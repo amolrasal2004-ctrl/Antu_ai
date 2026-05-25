@@ -3,41 +3,22 @@
 //|                                          Copyright 2026, Antu AI |
 //|                                                                  |
 //|  XAU Sideways Scalper Pro v3                                     |
-//|                                                                  |
 //|  Single-file production-ready EA for XAUUSD M5.                  |
 //|  Strategy = mean-reversion scalping inside confirmed sideways    |
 //|  ranges only. Designed to run every day, every month, every year |
-//|  with low drawdown by aggressively filtering trending markets    |
-//|  and locking small consistent profits.                           |
-//|                                                                  |
-//|  Core features:                                                  |
-//|    - Strict sideways detection (ADX + ATR/Width + BB squeeze +   |
-//|      M15 HTF confirmation)                                       |
-//|    - Multi-confirmation entries (S/R touch + pattern + RSI +     |
-//|      Stochastic + Bollinger band tag)                            |
-//|    - Mean-reversion TP at range midpoint or opposite band        |
-//|    - Partial close at 1R + breakeven + ATR trailing stop         |
-//|    - Daily profit target (auto-stop trading for the day)         |
-//|    - Daily loss limit + consecutive-loss circuit breaker         |
-//|    - Time-based exit (no stuck trades)                           |
-//|    - News-time / session / London-NY-open blackout filters       |
-//|    - Spread filter, slippage cap, magic-number isolation         |
-//|    - On-chart dashboard, arrows, trade log file                  |
-//|                                                                  |
-//|  All decisions are made on closed candles (shift >= 1) so the    |
-//|  signal does not repaint.                                        |
+//|  with low drawdown.                                              |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Antu AI"
 #property version   "3.00"
 #property strict
 #property description "XAU Sideways Scalper Pro v3 - XAUUSD M5 mean-reversion scalper"
 
-#include <Trade/Trade.mqh>
-#include <Trade/PositionInfo.mqh>
+#include <Trade\Trade.mqh>
+#include <Trade\PositionInfo.mqh>
 
 //============================== INPUTS ==============================
 
-input group "=== General ==="
+// --- General ---
 input ulong  InpMagic                 = 20260601;
 input string InpTradeComment          = "XAU_SSP3";
 input bool   InpAllowOnlyXAU          = true;
@@ -46,15 +27,15 @@ input bool   InpShowDashboard         = true;
 input bool   InpPushAlerts            = false;
 input string InpLogFileName           = "XAU_SSP3_log.txt";
 
-input group "=== Risk & Daily Limits ==="
-input double InpRiskPercent           = 0.5;   // % balance risked per trade (scalper -> small)
-input double InpDailyProfitTargetPct  = 1.5;   // stop trading once daily PnL >= +X% (0 = disabled)
-input double InpMaxDailyLossPercent   = 2.0;   // stop & flat if daily PnL <= -X% (0 = disabled)
-input int    InpMaxConsecutiveLosses  = 3;     // circuit breaker: stop for the day after N losses
+// --- Risk & Daily Limits ---
+input double InpRiskPercent           = 0.5;   // % balance risked per trade
+input double InpDailyProfitTargetPct  = 1.5;   // stop trading once daily PnL >= +X%
+input double InpMaxDailyLossPercent   = 2.0;   // stop & flat if daily PnL <= -X%
+input int    InpMaxConsecutiveLosses  = 3;     // circuit breaker
 input int    InpMaxOpenTrades         = 1;
-input int    InpMaxTradesPerDay       = 8;     // hard cap to avoid over-trading
+input int    InpMaxTradesPerDay       = 8;     // hard cap
 
-input group "=== Range Detection ==="
+// --- Range Detection ---
 input int    InpRangeLookback         = 50;    // M5 bars to scan for range
 input int    InpMinTouchesPerSide     = 2;
 input double InpTouchTolerancePoints  = 250;   // 2.50 USD on 2-digit gold
@@ -63,10 +44,10 @@ input int    InpBreakoutCooldownBars  = 20;    // pause N bars after breakout
 input bool   InpUseHtfFilter          = true;  // M15 HTF range confirmation
 input ENUM_TIMEFRAMES InpHtfPeriod    = PERIOD_M15;
 
-input group "=== Indicators ==="
+// --- Indicators ---
 input int    InpAtrPeriod             = 14;
 input int    InpAdxPeriod             = 14;
-input double InpAdxMax                = 25.0;  // sideways = ADX <= 25 (strict)
+input double InpAdxMax                = 25.0;  // sideways = ADX <= 25
 input int    InpRsiPeriod             = 14;
 input double InpRsiBuyMax             = 35.0;
 input double InpRsiSellMin            = 65.0;
@@ -77,32 +58,32 @@ input double InpStochOversold         = 25.0;
 input double InpStochOverbought       = 75.0;
 input int    InpBbPeriod              = 20;
 input double InpBbDeviation           = 2.0;
-input bool   InpRequireBbTag          = true;  // require candle tag of BB band
+input bool   InpRequireBbTag          = true;
 
-input group "=== SL / TP / Exits ==="
+// --- SL / TP / Exits ---
 input double InpSlAtrMultiplier       = 1.2;   // tight SL beyond range edge
 input double InpTpRRMultiplier        = 1.5;   // base RR
-input bool   InpTpAtRangeMid          = true;  // TP capped at range midpoint (mean reversion)
+input bool   InpTpAtRangeMid          = true;  // TP capped at range midpoint
 input bool   InpUsePartialClose       = true;
-input double InpPartialClosePct       = 50.0;  // close 50% at 1R
+input double InpPartialClosePct       = 50.0;
 input bool   InpUseBreakEven          = true;
 input double InpBreakEvenLockPts      = 30;    // 0.30 USD locked after partial
 input bool   InpUseTrailing           = true;
-input double InpTrailAtrMultiplier    = 1.0;   // ATR-based trail step
+input double InpTrailAtrMultiplier    = 1.0;
 input int    InpMaxBarsInTrade        = 24;    // close after N M5 bars (~2h)
 
-input group "=== Filters ==="
+// --- Filters ---
 input int    InpSpreadLimitPoints     = 50;    // 0.50 USD on 2-digit gold
 input int    InpSlippagePoints        = 20;
 input bool   InpUseSessionFilter      = true;
-input int    InpSessionStartHour      = 7;     // server time (broker)
+input int    InpSessionStartHour      = 7;     // server time
 input int    InpSessionEndHour        = 19;
 input bool   InpAvoidLondonOpen       = true;
 input bool   InpAvoidNYOpen           = true;
 input int    InpLondonOpenHour        = 10;
 input int    InpNyOpenHour            = 15;
 input int    InpAvoidMinutesAround    = 20;
-input bool   InpAvoidFridayLate       = true;  // skip Friday afternoon (>= FridayCutoffHour)
+input bool   InpAvoidFridayLate       = true;
 input int    InpFridayCutoffHour      = 18;
 
 //============================== TYPES ===============================
@@ -155,7 +136,7 @@ double         g_dayStartEquity = 0;
 datetime       g_dayStartTime   = 0;
 int            g_dayTradesOpened = 0;
 int            g_dayConsecutiveLosses = 0;
-bool           g_dayStopFlag    = false;     // true once target / loss / circuit breaker hits
+bool           g_dayStopFlag    = false;
 ulong          g_lastClosedDealId = 0;
 
 int            g_totalTrades  = 0;
@@ -166,7 +147,7 @@ ulong          g_lastDealIdSeen = 0;
 int            g_logHandle = INVALID_HANDLE;
 string         g_lastReason = "init";
 
-STradeMeta     g_meta;   // tracking for the single open trade
+STradeMeta     g_meta;
 
 //============================== LOG =================================
 
@@ -174,9 +155,7 @@ void WriteLog(const string msg)
 {
    Print("[XAU SSP3] ", msg);
    if(g_logHandle == INVALID_HANDLE) return;
-   string line = StringFormat("%s | %s\n",
-                              TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
-                              msg);
+   string line = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + " | " + msg + "\n";
    FileWriteString(g_logHandle, line);
    FileFlush(g_logHandle);
 }
@@ -201,7 +180,7 @@ void RollDayIfNeeded()
       g_dayTradesOpened      = 0;
       g_dayConsecutiveLosses = 0;
       g_dayStopFlag          = false;
-      WriteLog(StringFormat("--- New day. StartEquity=%.2f ---", g_dayStartEquity));
+      WriteLog("--- New day. StartEquity=" + DoubleToString(g_dayStartEquity, 2) + " ---");
    }
 }
 
@@ -236,7 +215,8 @@ double NormalizeLot(double lots)
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double stepLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    if(stepLot <= 0) stepLot = 0.01;
-   lots = MathMax(minLot, MathMin(maxLot, lots));
+   if(lots < minLot) lots = minLot;
+   if(lots > maxLot) lots = maxLot;
    lots = MathFloor(lots / stepLot) * stepLot;
    return NormalizeDouble(lots, 2);
 }
@@ -265,8 +245,9 @@ bool IsAroundHour(int curH, int curM, int targetH, int avoidM)
 {
    int curMinutes    = curH * 60 + curM;
    int targetMinutes = targetH * 60;
-   int diff          = MathAbs(curMinutes - targetMinutes);
-   diff = MathMin(diff, 24 * 60 - diff);
+   int diff          = (int)MathAbs(curMinutes - targetMinutes);
+   int wrap          = 24 * 60 - diff;
+   if(wrap < diff) diff = wrap;
    return diff <= avoidM;
 }
 
@@ -275,18 +256,19 @@ bool FiltersOK(string &reason)
    int sp = CurrentSpreadPoints();
    if(sp > InpSpreadLimitPoints)
    {
-      reason = StringFormat("Spread %d > %d", sp, InpSpreadLimitPoints);
+      reason = "Spread " + IntegerToString(sp) + " > " + IntegerToString(InpSpreadLimitPoints);
       return false;
    }
 
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
-   int h = dt.hour, m = dt.min;
-   int dow = dt.day_of_week;   // 0=Sun, 5=Fri
+   int h = dt.hour;
+   int m = dt.min;
+   int dow = dt.day_of_week;
 
    if(InpAvoidFridayLate && dow == 5 && h >= InpFridayCutoffHour)
    {
-      reason = StringFormat("Friday late (>=%02d:00)", InpFridayCutoffHour);
+      reason = "Friday late";
       return false;
    }
 
@@ -296,7 +278,7 @@ bool FiltersOK(string &reason)
       {
          if(h < InpSessionStartHour || h >= InpSessionEndHour)
          {
-            reason = StringFormat("Out of session %02d-%02d", InpSessionStartHour, InpSessionEndHour);
+            reason = "Out of session";
             return false;
          }
       }
@@ -304,7 +286,7 @@ bool FiltersOK(string &reason)
       {
          if(h < InpSessionStartHour && h >= InpSessionEndHour)
          {
-            reason = StringFormat("Out of session %02d-%02d", InpSessionStartHour, InpSessionEndHour);
+            reason = "Out of session";
             return false;
          }
       }
@@ -344,8 +326,12 @@ bool RangeUpdate()
    if(CopyLow(_Symbol, _Period, 1, InpRangeLookback, lows)     <= 0) return false;
    if(CopyClose(_Symbol, _Period, 1, InpRangeLookback, closes) <= 0) return false;
 
-   double resistance = highs[ArrayMaximum(highs, 0, InpRangeLookback)];
-   double support    = lows[ArrayMinimum(lows, 0, InpRangeLookback)];
+   int idxR = ArrayMaximum(highs, 0, InpRangeLookback);
+   int idxS = ArrayMinimum(lows,  0, InpRangeLookback);
+   if(idxR < 0 || idxS < 0) return false;
+
+   double resistance = highs[idxR];
+   double support    = lows[idxS];
    double width      = resistance - support;
    if(width <= 0) { g_range.reason = "no width"; return false; }
 
@@ -359,14 +345,15 @@ bool RangeUpdate()
       if(lows[i]  <= support + tol    && closes[i] > support + tol * 0.5)    sTouch++;
    }
 
-   double atrBuf[];   ArraySetAsSeries(atrBuf, true);
-   double adxBuf[];   ArraySetAsSeries(adxBuf, true);
+   double atrBuf[];
+   double adxBuf[];
+   ArraySetAsSeries(atrBuf, true);
+   ArraySetAsSeries(adxBuf, true);
    if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0) return false;
    if(CopyBuffer(g_adxHandle, 0, 1, 1, adxBuf) <= 0) return false;
    double atr = atrBuf[0];
    double adx = adxBuf[0];
 
-   // Bollinger width (squeeze indicator)
    double bbU[], bbL[];
    ArraySetAsSeries(bbU, true);
    ArraySetAsSeries(bbL, true);
@@ -388,25 +375,24 @@ bool RangeUpdate()
    if(sTouch < InpMinTouchesPerSide || rTouch < InpMinTouchesPerSide)
    {
       g_range.valid = false;
-      g_range.reason = StringFormat("touches S=%d R=%d", sTouch, rTouch);
+      g_range.reason = "touches";
       return true;
    }
 
    if(atr <= 0 || (atr / width) > InpAtrMaxRatio)
    {
       g_range.valid = false;
-      g_range.reason = StringFormat("ATR/W=%.2f", (width > 0 ? atr/width : 0));
+      g_range.reason = "ATR/W too high";
       return true;
    }
 
    if(adx > InpAdxMax)
    {
       g_range.valid = false;
-      g_range.reason = StringFormat("ADX=%.1f trending", adx);
+      g_range.reason = "ADX trending";
       return true;
    }
 
-   // HTF M15 confirmation: HTF ADX must also be calm and HTF ATR must be small vs width
    if(InpUseHtfFilter)
    {
       double htfAdxBuf[], htfAtrBuf[];
@@ -422,13 +408,13 @@ bool RangeUpdate()
       if(htfAdxBuf[0] > InpAdxMax + 5)
       {
          g_range.valid = false;
-         g_range.reason = StringFormat("HTF ADX=%.1f trending", htfAdxBuf[0]);
+         g_range.reason = "HTF ADX trending";
          return true;
       }
       if(htfAtrBuf[0] > width * 0.6)
       {
          g_range.valid = false;
-         g_range.reason = "HTF ATR too big vs width";
+         g_range.reason = "HTF ATR too big";
          return true;
       }
    }
@@ -522,7 +508,7 @@ ENUM_SIGNAL EvaluateSignal(double &outRsi, double &outStoch, string &outReason)
    outStoch = 0.0;
    outReason = "";
 
-   if(!g_range.valid) { outReason = "range " + g_range.reason; return SIG_NONE; }
+   if(!g_range.valid) { outReason = "range invalid"; return SIG_NONE; }
 
    double o[], h[], l[], c[];
    ArraySetAsSeries(o, true);
@@ -534,9 +520,9 @@ ENUM_SIGNAL EvaluateSignal(double &outRsi, double &outStoch, string &outReason)
    if(CopyLow(_Symbol, _Period, 1, 2, l)   <= 0) return SIG_NONE;
    if(CopyClose(_Symbol, _Period, 1, 2, c) <= 0) return SIG_NONE;
 
-   double rsiBuf[];   ArraySetAsSeries(rsiBuf, true);
-   double stochK[];   ArraySetAsSeries(stochK, true);
-   double bbU[], bbL[];
+   double rsiBuf[], stochK[], bbU[], bbL[];
+   ArraySetAsSeries(rsiBuf, true);
+   ArraySetAsSeries(stochK, true);
    ArraySetAsSeries(bbU, true);
    ArraySetAsSeries(bbL, true);
 
@@ -558,33 +544,27 @@ ENUM_SIGNAL EvaluateSignal(double &outRsi, double &outStoch, string &outReason)
 
    if(nearSup)
    {
-      bool pat   = IsBullishEngulfing(o[1], c[1], o[0], c[0]) ||
-                   IsBullishPin(o[0], h[0], l[0], c[0]);
-      if(!pat)            { outReason = "no bull pattern";       return SIG_NONE; }
-      if(rsiNow > InpRsiBuyMax)
-                          { outReason = StringFormat("rsi=%.0f>%.0f", rsiNow, InpRsiBuyMax); return SIG_NONE; }
-      if(rsiNow < rsiPrev){ outReason = "rsi not turning up";    return SIG_NONE; }
-      if(stNow > InpStochOversold)
-                          { outReason = StringFormat("stoch=%.0f>%.0f", stNow, InpStochOversold); return SIG_NONE; }
-      if(stNow < stPrev)  { outReason = "stoch not turning up";  return SIG_NONE; }
-      if(InpRequireBbTag && l[0] > bbL[0])
-                          { outReason = "no BB lower tag";       return SIG_NONE; }
+      bool pat = IsBullishEngulfing(o[1], c[1], o[0], c[0]) ||
+                 IsBullishPin(o[0], h[0], l[0], c[0]);
+      if(!pat)                       { outReason = "no bull pattern";       return SIG_NONE; }
+      if(rsiNow > InpRsiBuyMax)      { outReason = "rsi too high";          return SIG_NONE; }
+      if(rsiNow < rsiPrev)           { outReason = "rsi not turning up";    return SIG_NONE; }
+      if(stNow > InpStochOversold)   { outReason = "stoch too high";        return SIG_NONE; }
+      if(stNow < stPrev)             { outReason = "stoch not turning up";  return SIG_NONE; }
+      if(InpRequireBbTag && l[0] > bbL[0]) { outReason = "no BB lower tag"; return SIG_NONE; }
       return SIG_BUY;
    }
 
    if(nearRes)
    {
-      bool pat   = IsBearishEngulfing(o[1], c[1], o[0], c[0]) ||
-                   IsShootingStar(o[0], h[0], l[0], c[0]);
-      if(!pat)             { outReason = "no bear pattern";      return SIG_NONE; }
-      if(rsiNow < InpRsiSellMin)
-                           { outReason = StringFormat("rsi=%.0f<%.0f", rsiNow, InpRsiSellMin); return SIG_NONE; }
-      if(rsiNow > rsiPrev) { outReason = "rsi not turning down"; return SIG_NONE; }
-      if(stNow < InpStochOverbought)
-                           { outReason = StringFormat("stoch=%.0f<%.0f", stNow, InpStochOverbought); return SIG_NONE; }
-      if(stNow > stPrev)   { outReason = "stoch not turning down"; return SIG_NONE; }
-      if(InpRequireBbTag && h[0] < bbU[0])
-                           { outReason = "no BB upper tag";      return SIG_NONE; }
+      bool pat = IsBearishEngulfing(o[1], c[1], o[0], c[0]) ||
+                 IsShootingStar(o[0], h[0], l[0], c[0]);
+      if(!pat)                          { outReason = "no bear pattern";       return SIG_NONE; }
+      if(rsiNow < InpRsiSellMin)        { outReason = "rsi too low";           return SIG_NONE; }
+      if(rsiNow > rsiPrev)              { outReason = "rsi not turning down";  return SIG_NONE; }
+      if(stNow < InpStochOverbought)    { outReason = "stoch too low";         return SIG_NONE; }
+      if(stNow > stPrev)                { outReason = "stoch not turning down";return SIG_NONE; }
+      if(InpRequireBbTag && h[0] < bbU[0]) { outReason = "no BB upper tag";    return SIG_NONE; }
       return SIG_SELL;
    }
    return SIG_NONE;
@@ -609,12 +589,7 @@ int CountOpenPositions()
 void DrawEntryArrow(const ENUM_ORDER_TYPE type, const double price)
 {
    if(!InpDrawObjects) return;
-   string ts = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
-   string tag = "XSSP3_" + ts;
-   StringReplace(tag, ":", "");
-   StringReplace(tag, " ", "_");
-   StringReplace(tag, ".", "");
-   string arrowName = "ARR_" + tag;
+   string arrowName = "XSSP3_ARR_" + IntegerToString((int)TimeCurrent());
    if(ObjectCreate(0, arrowName, OBJ_ARROW, 0, TimeCurrent(), price))
    {
       ObjectSetInteger(0, arrowName, OBJPROP_ARROWCODE, (type == ORDER_TYPE_BUY) ? 233 : 234);
@@ -629,18 +604,22 @@ bool OpenTrade(const ENUM_ORDER_TYPE type, const double lots,
    double price = (type == ORDER_TYPE_BUY)
                   ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                   : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   bool ok = (type == ORDER_TYPE_BUY)
-             ? g_trade.Buy(lots, _Symbol, price, sl, tp, comment)
-             : g_trade.Sell(lots, _Symbol, price, sl, tp, comment);
+   bool ok;
+   if(type == ORDER_TYPE_BUY)
+      ok = g_trade.Buy(lots, _Symbol, price, sl, tp, comment);
+   else
+      ok = g_trade.Sell(lots, _Symbol, price, sl, tp, comment);
 
    if(ok)
    {
-      WriteLog(StringFormat("OPEN %s lots=%.2f price=%.2f SL=%.2f TP=%.2f",
-                            (type == ORDER_TYPE_BUY ? "BUY":"SELL"),
-                            lots, price, sl, tp));
+      WriteLog("OPEN " + ((type == ORDER_TYPE_BUY) ? "BUY" : "SELL") +
+               " lots=" + DoubleToString(lots, 2) +
+               " price=" + DoubleToString(price, _Digits) +
+               " SL=" + DoubleToString(sl, _Digits) +
+               " TP=" + DoubleToString(tp, _Digits));
       if(InpPushAlerts)
-         SendNotification(StringFormat("[XAU SSP3] %s @ %.2f",
-                          (type == ORDER_TYPE_BUY ? "BUY":"SELL"), price));
+         SendNotification("[XAU SSP3] " + ((type == ORDER_TYPE_BUY) ? "BUY" : "SELL") +
+                          " @ " + DoubleToString(price, _Digits));
       DrawEntryArrow(type, price);
 
       g_meta.ticket      = g_trade.ResultDeal();
@@ -654,9 +633,8 @@ bool OpenTrade(const ENUM_ORDER_TYPE type, const double lots,
    }
    else
    {
-      WriteLog(StringFormat("OPEN FAIL err=%d %s",
-                            g_trade.ResultRetcode(),
-                            g_trade.ResultRetcodeDescription()));
+      WriteLog("OPEN FAIL err=" + IntegerToString(g_trade.ResultRetcode()) + " " +
+               g_trade.ResultRetcodeDescription());
    }
    return ok;
 }
@@ -671,7 +649,7 @@ void CloseAllOurPositions(const string reason)
       if(g_pos.Symbol() != _Symbol) continue;
       if((ulong)g_pos.Magic() != InpMagic) continue;
       if(g_trade.PositionClose(ticket))
-         WriteLog(StringFormat("CLOSE ticket=%I64u (%s)", ticket, reason));
+         WriteLog("CLOSE ticket=" + IntegerToString((int)ticket) + " (" + reason + ")");
    }
 }
 
@@ -693,23 +671,22 @@ void ManageOpenPositions()
       double openPrice = g_pos.PriceOpen();
       double sl        = g_pos.StopLoss();
       double tp        = g_pos.TakeProfit();
-      long   type      = g_pos.PositionType();
+      long   ptype     = g_pos.PositionType();
       double volume    = g_pos.Volume();
       datetime tOpen   = (datetime)g_pos.Time();
 
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double curPrice = (type == POSITION_TYPE_BUY) ? bid : ask;
+      double curPrice = (ptype == POSITION_TYPE_BUY) ? bid : ask;
 
-      // Initial risk in price units (use stored initial SL when available)
       double initSL = (g_meta.initialSL > 0 && g_pos.Ticket() == g_meta.ticket)
                       ? g_meta.initialSL : sl;
-      double oneR = (type == POSITION_TYPE_BUY)
+      double oneR = (ptype == POSITION_TYPE_BUY)
                      ? (openPrice - initSL)
                      : (initSL - openPrice);
       if(oneR <= 0) oneR = (atr > 0 ? atr : point * 100);
 
-      double profitPrice = (type == POSITION_TYPE_BUY)
+      double profitPrice = (ptype == POSITION_TYPE_BUY)
                            ? (curPrice - openPrice)
                            : (openPrice - curPrice);
 
@@ -721,7 +698,7 @@ void ManageOpenPositions()
          if(secsPerBar > 0 && elapsed >= secsPerBar * InpMaxBarsInTrade)
          {
             if(g_trade.PositionClose(ticket))
-               WriteLog(StringFormat("TIME EXIT ticket=%I64u after %d bars", ticket, InpMaxBarsInTrade));
+               WriteLog("TIME EXIT ticket=" + IntegerToString((int)ticket));
             continue;
          }
       }
@@ -740,40 +717,42 @@ void ManageOpenPositions()
          {
             if(g_trade.PositionClosePartial(ticket, closeLot))
             {
-               WriteLog(StringFormat("PARTIAL CLOSE %.2f lots ticket=%I64u @ +1R", closeLot, ticket));
+               WriteLog("PARTIAL CLOSE " + DoubleToString(closeLot, 2) + " lots @ +1R");
                if(g_pos.Ticket() == g_meta.ticket) g_meta.partialDone = true;
 
-               // Move SL to break-even (+lock)
                if(InpUseBreakEven)
                {
-                  double beSL = (type == POSITION_TYPE_BUY)
+                  double beSL = (ptype == POSITION_TYPE_BUY)
                                 ? openPrice + InpBreakEvenLockPts * point
                                 : openPrice - InpBreakEvenLockPts * point;
                   beSL = NormalizeDouble(beSL, _Digits);
                   if(g_trade.PositionModify(ticket, beSL, tp))
-                     WriteLog(StringFormat("BE SL set ticket=%I64u SL=%.2f", ticket, beSL));
+                     WriteLog("BE SL set " + DoubleToString(beSL, _Digits));
                }
                continue;
             }
          }
       }
 
-      // ---- ATR trailing stop (after partial done OR after +1R if no partial) ----
+      // ---- ATR trailing stop ----
       bool canTrail = InpUseTrailing && atr > 0 &&
                       (partialDone || (!InpUsePartialClose && profitPrice >= oneR));
       if(canTrail)
       {
          double trailDist = InpTrailAtrMultiplier * atr;
-         double newSL = (type == POSITION_TYPE_BUY)
+         double newSL = (ptype == POSITION_TYPE_BUY)
                         ? curPrice - trailDist
                         : curPrice + trailDist;
          newSL = NormalizeDouble(newSL, _Digits);
-         bool improve = (type == POSITION_TYPE_BUY)  ? (newSL > sl + point)
-                                                     : (newSL < sl - point || sl == 0);
+         bool improve;
+         if(ptype == POSITION_TYPE_BUY)
+            improve = (newSL > sl + point);
+         else
+            improve = (newSL < sl - point) || (sl == 0);
          if(improve)
          {
             if(g_trade.PositionModify(ticket, newSL, tp))
-               WriteLog(StringFormat("TRAIL ticket=%I64u SL=%.2f", ticket, newSL));
+               WriteLog("TRAIL SL=" + DoubleToString(newSL, _Digits));
          }
       }
    }
@@ -802,7 +781,6 @@ void UpdateClosedTradeStats()
       trades++;
       if(profit >= 0) wins++; else losses++;
 
-      // Track consecutive losses for THIS DAY only
       datetime dealTime = (datetime)HistoryDealGetInteger(dealId, DEAL_TIME);
       if(dealId > g_lastClosedDealId && dealTime >= g_dayStartTime)
       {
@@ -823,8 +801,8 @@ void UpdateClosedTradeStats()
 
 void DrawLabel(int line, const string title, const string value, color clr)
 {
-   string name = StringFormat("XSSP3_DASH_L%02d", line);
-   string text = StringFormat("%-10s : %s", title, value);
+   string name = "XSSP3_DASH_L" + IntegerToString(line);
+   string text = title + " : " + value;
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
@@ -842,34 +820,44 @@ void UpdateDashboard()
 {
    if(!InpShowDashboard) return;
    int line = 0;
-   DrawLabel(line++, "XAU SSP3", StringFormat("v3.0  %s  %s", _Symbol, EnumToString(_Period)), clrGold);
-   DrawLabel(line++, "Range",
-             g_range.valid
-                ? StringFormat("S=%.2f R=%.2f Mid=%.2f W=%.2f",
-                               g_range.support, g_range.resistance, g_range.mid, g_range.width)
-                : StringFormat("INVALID (%s)", g_range.reason),
-             g_range.valid ? clrLime : clrOrangeRed);
+   DrawLabel(line++, "XAU SSP3", "v3.0  " + _Symbol, clrGold);
+
+   string rangeStr;
+   if(g_range.valid)
+      rangeStr = "S=" + DoubleToString(g_range.support, 2) +
+                 " R=" + DoubleToString(g_range.resistance, 2) +
+                 " W=" + DoubleToString(g_range.width, 2);
+   else
+      rangeStr = "INVALID (" + g_range.reason + ")";
+   DrawLabel(line++, "Range", rangeStr, g_range.valid ? clrLime : clrOrangeRed);
+
    DrawLabel(line++, "Indic",
-             StringFormat("Touch S=%d R=%d  ATR=%.2f  ADX=%.1f  BBw=%.2f",
-                          g_range.supportTouches, g_range.resistanceTouches,
-                          g_range.atr, g_range.adx, g_range.bbWidth),
+             "S=" + IntegerToString(g_range.supportTouches) +
+             " R=" + IntegerToString(g_range.resistanceTouches) +
+             " ATR=" + DoubleToString(g_range.atr, 2) +
+             " ADX=" + DoubleToString(g_range.adx, 1),
              clrWhite);
+
    double wr = (g_totalTrades > 0) ? (100.0 * g_wins / g_totalTrades) : 0.0;
    DrawLabel(line++, "Trades30d",
-             StringFormat("%d (W:%d L:%d) %.1f%%", g_totalTrades, g_wins, g_losses, wr),
+             IntegerToString(g_totalTrades) + " (W:" + IntegerToString(g_wins) +
+             " L:" + IntegerToString(g_losses) + ") " + DoubleToString(wr, 1) + "%",
              clrWhite);
+
    DrawLabel(line++, "Today",
-             StringFormat("PnL=%.2f (%.2f%%)  trades=%d  consecL=%d",
-                          DayPnL(), DayPnLPercent(),
-                          g_dayTradesOpened, g_dayConsecutiveLosses),
+             "PnL=" + DoubleToString(DayPnL(), 2) +
+             " (" + DoubleToString(DayPnLPercent(), 2) + "%) " +
+             "trades=" + IntegerToString(g_dayTradesOpened) +
+             " consecL=" + IntegerToString(g_dayConsecutiveLosses),
              (DayPnL() >= 0) ? clrLime : clrRed);
+
    DrawLabel(line++, "Limits",
-             StringFormat("Tgt=+%.1f%%  MaxLoss=-%.1f%%  MaxL=%d  MaxTr=%d",
-                          InpDailyProfitTargetPct, InpMaxDailyLossPercent,
-                          InpMaxConsecutiveLosses, InpMaxTradesPerDay),
+             "Tgt=+" + DoubleToString(InpDailyProfitTargetPct, 1) + "% " +
+             "MaxLoss=-" + DoubleToString(InpMaxDailyLossPercent, 1) + "% " +
+             "MaxL=" + IntegerToString(InpMaxConsecutiveLosses),
              clrSilver);
-   DrawLabel(line++, "Spread",  StringFormat("%d pts", CurrentSpreadPoints()), clrWhite);
-   DrawLabel(line++, "Status",  g_lastReason, g_dayStopFlag ? clrRed : clrOrange);
+   DrawLabel(line++, "Spread", IntegerToString(CurrentSpreadPoints()) + " pts", clrWhite);
+   DrawLabel(line++, "Status", g_lastReason, g_dayStopFlag ? clrRed : clrOrange);
 }
 
 //============================== ONINIT / ONTICK =====================
@@ -879,8 +867,9 @@ int OnInit()
    if(InpAllowOnlyXAU)
    {
       string sym = _Symbol;
-      StringToUpper(sym);
-      if(StringFind(sym, "XAU") < 0 && StringFind(sym, "GOLD") < 0)
+      string symU = sym;
+      StringToUpper(symU);
+      if(StringFind(symU, "XAU") < 0 && StringFind(symU, "GOLD") < 0)
       {
          Print("This EA is intended for XAUUSD/GOLD. Current: ", _Symbol);
          return INIT_FAILED;
@@ -918,10 +907,8 @@ int OnInit()
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(InpSlippagePoints);
-   g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   g_logHandle = FileOpen(InpLogFileName,
-                          FILE_WRITE|FILE_READ|FILE_TXT|FILE_COMMON|FILE_SHARE_READ);
+   g_logHandle = FileOpen(InpLogFileName, FILE_WRITE|FILE_READ|FILE_TXT);
    if(g_logHandle != INVALID_HANDLE)
    {
       FileSeek(g_logHandle, 0, SEEK_END);
@@ -938,9 +925,11 @@ int OnInit()
    ZeroMemory(g_meta);
    g_lastBarTime      = 0;
    g_breakoutCooldown = 0;
-   g_totalTrades = g_wins = g_losses = 0;
+   g_totalTrades = 0;
+   g_wins = 0;
+   g_losses = 0;
 
-   Print("XAU Sideways Scalper Pro v3.0 initialised on ", _Symbol, " ", EnumToString(_Period));
+   Print("XAU Sideways Scalper Pro v3.0 initialised on ", _Symbol);
    return INIT_SUCCEEDED;
 }
 
@@ -966,31 +955,28 @@ void OnTick()
    RollDayIfNeeded();
    ManageOpenPositions();
 
-   // ---- Daily Profit Target: stop trading & flatten ----
    if(!g_dayStopFlag && DailyProfitTargetHit())
    {
       CloseAllOurPositions("Daily profit target reached");
       g_dayStopFlag = true;
-      g_lastReason  = StringFormat("DAY DONE: target +%.2f%% hit", DayPnLPercent());
+      g_lastReason  = "DAY DONE: target hit";
       WriteLog(g_lastReason);
    }
 
-   // ---- Daily Loss Limit ----
    if(!g_dayStopFlag && DailyLossHit())
    {
       CloseAllOurPositions("Daily loss limit");
       g_dayStopFlag = true;
-      g_lastReason  = StringFormat("DAY STOP: loss %.2f%% hit", DayPnLPercent());
+      g_lastReason  = "DAY STOP: loss hit";
       WriteLog(g_lastReason);
    }
 
-   // ---- Consecutive Loss Circuit Breaker ----
    if(!g_dayStopFlag && InpMaxConsecutiveLosses > 0 &&
       g_dayConsecutiveLosses >= InpMaxConsecutiveLosses)
    {
       CloseAllOurPositions("Circuit breaker");
       g_dayStopFlag = true;
-      g_lastReason  = StringFormat("DAY STOP: %d consecutive losses", g_dayConsecutiveLosses);
+      g_lastReason  = "DAY STOP: consec losses";
       WriteLog(g_lastReason);
    }
 
@@ -1000,7 +986,6 @@ void OnTick()
       return;
    }
 
-   // ---- Bar gate: only run signal logic on new bar ----
    datetime curBarTime = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
    if(curBarTime == g_lastBarTime)
    {
@@ -1036,13 +1021,13 @@ void OnTick()
    }
    if(g_dayTradesOpened >= InpMaxTradesPerDay)
    {
-      g_lastReason = StringFormat("daily trade cap %d reached", InpMaxTradesPerDay);
+      g_lastReason = "daily trade cap";
       UpdateDashboard();
       return;
    }
    if(g_breakoutCooldown > 0)
    {
-      g_lastReason = StringFormat("breakout cooldown %d", g_breakoutCooldown);
+      g_lastReason = "breakout cooldown " + IntegerToString(g_breakoutCooldown);
       UpdateDashboard();
       return;
    }
@@ -1082,11 +1067,13 @@ void OnTick()
       sl    = g_range.support - InpSlAtrMultiplier * atr;
       double slDist = entry - sl;
       tp    = entry + InpTpRRMultiplier * slDist;
-      // Cap TP at range mid (mean reversion target) for fast scalp
       if(InpTpAtRangeMid && g_range.mid > entry)
-         tp = MathMin(tp, g_range.mid - 5 * point);
-      // Hard cap at opposite side for safety
-      tp = MathMin(tp, g_range.resistance - 5 * point);
+      {
+         double midTp = g_range.mid - 5 * point;
+         if(midTp < tp) tp = midTp;
+      }
+      double resCap = g_range.resistance - 5 * point;
+      if(resCap < tp) tp = resCap;
    }
    else
    {
@@ -1095,15 +1082,19 @@ void OnTick()
       double slDist = sl - entry;
       tp    = entry - InpTpRRMultiplier * slDist;
       if(InpTpAtRangeMid && g_range.mid < entry)
-         tp = MathMax(tp, g_range.mid + 5 * point);
-      tp = MathMax(tp, g_range.support + 5 * point);
+      {
+         double midTp = g_range.mid + 5 * point;
+         if(midTp > tp) tp = midTp;
+      }
+      double supCap = g_range.support + 5 * point;
+      if(supCap > tp) tp = supCap;
    }
 
    double slDistPrice = MathAbs(entry - sl);
    double tpDistPrice = MathAbs(tp - entry);
    if(slDistPrice <= 0 || tpDistPrice < slDistPrice * 0.6)
    {
-      g_lastReason = StringFormat("RR too small (sl=%.2f tp=%.2f)", slDistPrice, tpDistPrice);
+      g_lastReason = "RR too small";
       UpdateDashboard();
       return;
    }
@@ -1119,10 +1110,7 @@ void OnTick()
    sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
 
-   string cmt = StringFormat("%s_%s_R%.0f_S%.0f",
-                             InpTradeComment,
-                             (sig == SIG_BUY ? "B":"S"),
-                             rsi, stoch);
+   string cmt = InpTradeComment + ((sig == SIG_BUY) ? "_B" : "_S");
 
    ENUM_ORDER_TYPE otype = (sig == SIG_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    OpenTrade(otype, lots, sl, tp, cmt);
@@ -1131,5 +1119,8 @@ void OnTick()
    UpdateDashboard();
 }
 
-void OnTrade() {}
+void OnTrade()
+{
+   // optional: keep for future use
+}
 //+------------------------------------------------------------------+
