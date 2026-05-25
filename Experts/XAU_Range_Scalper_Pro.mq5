@@ -39,37 +39,37 @@ input bool   InpPushAlerts            = false;        // off by default for back
 input string InpLogFileName           = "XAU_RSP_log.txt";
 
 input group "=== Risk Management ==="
-input double InpRiskPercent           = 0.5;          // % per trade (lowered)
-input double InpMaxDailyLossPercent   = 2.5;          // 0=off
+input double InpRiskPercent           = 1.0;
+input double InpMaxDailyLossPercent   = 3.0;
 input int    InpMaxOpenTrades         = 1;
 
 input group "=== Range Detection ==="
-input int    InpRangeLookback         = 60;           // candles for range
-input int    InpMinTouchesPerSide     = 3;            // stricter
-input int    InpMinTouchSpacing       = 5;            // bars between any 2 touches
-input double InpTouchTolerancePoints  = 200;          // points tolerance
-input double InpAtrMaxRatio           = 0.28;         // ATR / RangeWidth max
-input int    InpBreakoutCooldownBars  = 30;
-input bool   InpUseHtfFilter          = true;         // confirm HTF not volatile
+input int    InpRangeLookback         = 50;
+input int    InpMinTouchesPerSide     = 2;          // loosened
+input int    InpMinTouchSpacing       = 3;          // loosened
+input double InpTouchTolerancePoints  = 250;
+input double InpAtrMaxRatio           = 0.45;       // loosened
+input int    InpBreakoutCooldownBars  = 20;
+input bool   InpUseHtfFilter          = false;      // OFF
 input ENUM_TIMEFRAMES InpHtfPeriod    = PERIOD_M15;
 
 input group "=== Indicators ==="
 input int    InpAtrPeriod             = 14;
 input int    InpAdxPeriod             = 14;
-input double InpAdxMax                = 22.0;         // ADX must be below this
+input double InpAdxMax                = 30.0;       // loosened
 input int    InpRsiPeriod             = 14;
-input double InpRsiBuyMax             = 32.0;
-input double InpRsiSellMin            = 68.0;
+input double InpRsiBuyMax             = 38.0;
+input double InpRsiSellMin            = 62.0;
 input bool   InpUseBollinger          = false;
 input int    InpBbPeriod              = 20;
 input double InpBbDeviation           = 2.0;
-input bool   InpUseTrendFilter        = true;         // EMA200 distance filter
+input bool   InpUseTrendFilter        = false;      // OFF
 input int    InpEmaPeriod             = 200;
-input double InpEmaMaxDistAtr         = 4.0;          // skip if |price-EMA| > x*ATR
+input double InpEmaMaxDistAtr         = 5.0;
 
 input group "=== SL / TP ==="
-input double InpSlAtrMultiplier       = 1.3;
-input double InpTpRRMultiplier        = 1.6;
+input double InpSlAtrMultiplier       = 1.5;
+input double InpTpRRMultiplier        = 1.8;
 input bool   InpTpAtRangeOpposite     = true;
 
 input group "=== Trade Management ==="
@@ -81,7 +81,7 @@ input double InpTrailStartPoints      = 1000;
 input double InpTrailStepPoints       = 500;
 
 input group "=== Filters ==="
-input int    InpSpreadLimitPoints     = 35;
+input int    InpSpreadLimitPoints     = 50;
 input int    InpSlippagePoints        = 20;
 input bool   InpUseSessionFilter      = true;
 input int    InpSessionStartHour      = 8;            // server time
