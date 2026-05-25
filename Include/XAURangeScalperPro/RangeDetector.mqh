@@ -108,7 +108,7 @@ public:
          }
       }
 
-      ZeroMemory(m_range);
+      ResetRange();
       return true;
    }
 
@@ -125,7 +125,7 @@ public:
    //--- recompute on each new bar; uses only closed bars (shift>=1)
    bool Update()
    {
-      ZeroMemory(m_range);
+      ResetRange();
       m_range.computedAt = TimeCurrent();
       m_range.reason     = "n/a";
 
@@ -159,21 +159,27 @@ public:
       double tol   = m_touchTolerancePts * point;
 
       // count rejection touches AND record their bar indices
-      int sIdx[256], rIdx[256];
+      int sIdx[], rIdx[];
+      ArrayResize(sIdx, 0);
+      ArrayResize(rIdx, 0);
       int sTouch = 0, rTouch = 0;
 
-      for(int i = 0; i < m_lookback && i < 256; i++)
+      for(int i = 0; i < m_lookback; i++)
       {
          // resistance rejection
          if(highs[i] >= resistance - tol && closes[i] < resistance - tol*0.5)
          {
-            if(rTouch < 256) rIdx[rTouch] = i;
+            int n = ArraySize(rIdx);
+            ArrayResize(rIdx, n + 1);
+            rIdx[n] = i;
             rTouch++;
          }
          // support rejection
          if(lows[i] <= support + tol && closes[i] > support + tol*0.5)
          {
-            if(sTouch < 256) sIdx[sTouch] = i;
+            int n = ArraySize(sIdx);
+            ArrayResize(sIdx, n + 1);
+            sIdx[n] = i;
             sTouch++;
          }
       }
@@ -301,6 +307,21 @@ public:
    }
 
 private:
+   //--- reset SRange without ZeroMemory (it has a string member)
+   void ResetRange()
+   {
+      m_range.valid             = false;
+      m_range.support           = 0.0;
+      m_range.resistance        = 0.0;
+      m_range.width             = 0.0;
+      m_range.supportTouches    = 0;
+      m_range.resistanceTouches = 0;
+      m_range.atr               = 0.0;
+      m_range.adx               = 0.0;
+      m_range.computedAt        = 0;
+      m_range.reason            = "";
+   }
+
    //--- check that any two touches are at least m_minTouchSpacing bars apart
    bool TouchesSpaced(const int &idx[], const int count) const
    {

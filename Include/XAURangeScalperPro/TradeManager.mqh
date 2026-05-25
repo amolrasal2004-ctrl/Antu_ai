@@ -220,8 +220,10 @@ public:
    {
       Print("[XAU RSP] ", msg);
       if(m_logHandle == INVALID_HANDLE) return;
-      string line = StringFormat("%s | %s\n", TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), msg);
+      string ts   = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
+      string line = ts + " | " + msg;
       FileWriteString(m_logHandle, line);
+      FileWriteString(m_logHandle, ShortToString(13) + ShortToString(10));
       FileFlush(m_logHandle);
    }
 

@@ -14,7 +14,6 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Antu AI"
 #property version   "1.10"
-#property strict
 #property description "XAU Range Scalper Pro v1.1 - XAUUSD M5 sideways/range strategy"
 
 #include <Trade/Trade.mqh>
