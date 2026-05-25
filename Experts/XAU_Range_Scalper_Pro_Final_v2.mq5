@@ -172,9 +172,10 @@ void WriteLog(const string msg)
 {
    Print("[XAU RSP] ", msg);
    if(g_logHandle == INVALID_HANDLE) return;
-   string line = StringFormat("%s | %s\n",
-                              TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), msg);
+   string ts   = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
+   string line = ts + " | " + msg;
    FileWriteString(g_logHandle, line);
+   FileWriteString(g_logHandle, ShortToString(13) + ShortToString(10));
    FileFlush(g_logHandle);
 }
 
