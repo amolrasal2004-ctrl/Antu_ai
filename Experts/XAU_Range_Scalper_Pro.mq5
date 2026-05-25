@@ -22,12 +22,13 @@
 
 #include <Trade/Trade.mqh>
 
-#include "..\\Include\\XAURangeScalperPro\\RangeDetector.mqh"
-#include "..\\Include\\XAURangeScalperPro\\SignalEngine.mqh"
-#include "..\\Include\\XAURangeScalperPro\\RiskManager.mqh"
-#include "..\\Include\\XAURangeScalperPro\\TradeManager.mqh"
-#include "..\\Include\\XAURangeScalperPro\\Filters.mqh"
-#include "..\\Include\\XAURangeScalperPro\\Dashboard.mqh"
+//--- Angle-bracket includes are resolved from <MT5 Data Folder>/MQL5/Include/
+#include <XAURangeScalperPro/RangeDetector.mqh>
+#include <XAURangeScalperPro/SignalEngine.mqh>
+#include <XAURangeScalperPro/RiskManager.mqh>
+#include <XAURangeScalperPro/TradeManager.mqh>
+#include <XAURangeScalperPro/Filters.mqh>
+#include <XAURangeScalperPro/Dashboard.mqh>
 
 //============================== INPUTS ==============================
 
