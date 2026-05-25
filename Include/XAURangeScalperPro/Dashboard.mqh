@@ -5,7 +5,7 @@
 #ifndef __XRSP_DASHBOARD_MQH__
 #define __XRSP_DASHBOARD_MQH__
 
-#include "RangeDetector.mqh"
+#include <XAURangeScalperPro/RangeDetector.mqh>
 
 struct SStats
 {
@@ -58,12 +58,12 @@ public:
       DrawLabel(line++, "Range",
                 r.valid
                    ? StringFormat("S=%.2f  R=%.2f  W=%.2f", r.support, r.resistance, r.width)
-                   : "INVALID",
+                   : StringFormat("INVALID (%s)", r.reason),
                 r.valid ? clrLime : clrOrangeRed);
 
       DrawLabel(line++, "Touches",
-                StringFormat("Sup=%d  Res=%d  ATR=%.2f",
-                             r.supportTouches, r.resistanceTouches, r.atr),
+                StringFormat("Sup=%d  Res=%d  ATR=%.2f  ADX=%.1f",
+                             r.supportTouches, r.resistanceTouches, r.atr, r.adx),
                 m_textColor);
 
       double wr = (s.totalTrades > 0)

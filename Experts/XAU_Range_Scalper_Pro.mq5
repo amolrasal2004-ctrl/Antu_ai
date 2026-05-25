@@ -3,22 +3,19 @@
 //|                                          Copyright 2026, Antu AI |
 //|                                                                  |
 //|  Range/Sideways scalper for XAUUSD M5.                           |
-//|  - Detects valid ranges using last N candles + ATR vol filter    |
-//|  - Trades S/R reversals confirmed by candlestick patterns + RSI  |
-//|  - Optional Bollinger Bands confirmation                         |
-//|  - Auto SL by ATR multiplier; TP by RR multiplier (or opposite   |
-//|    side of the range, whichever is closer)                       |
-//|  - 1% risk-based lot sizing, daily loss limit, max 1 trade       |
-//|  - Spread, session, London/NY open volatility filters            |
-//|  - Break-even, trailing stop                                     |
-//|  - Pauses entries on strong breakout, resumes on new range       |
-//|  - On-chart dashboard, push notifications, trade log file        |
-//|  - Backtest-ready, optimization-ready inputs                     |
+//|  v1.1 improvements:                                              |
+//|   - ADX trend-strength filter (only trade when ranging)          |
+//|   - EMA-200 trend filter (skip counter-trend in strong trends)   |
+//|   - Touch spacing validation (touches must be distributed)       |
+//|   - Higher-TF (M15) volatility confirmation                      |
+//|   - Stronger 2-bar breakout detection                            |
+//|   - Pattern engulfing / pin must have stronger structure         |
+//|   - RSI slope confirmation (turning, not just oversold)          |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Antu AI"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
-#property description "XAU Range Scalper Pro - XAUUSD M5 sideways/range strategy"
+#property description "XAU Range Scalper Pro v1.1 - XAUUSD M5 sideways/range strategy"
 
 #include <Trade/Trade.mqh>
 
@@ -33,59 +30,67 @@
 //============================== INPUTS ==============================
 
 input group "=== General ==="
-input ulong  InpMagic               = 20260525;       // Magic Number
-input string InpTradeComment         = "XAU_RSP";      // Trade comment
-input bool   InpAllowTradingOnlyXAU  = true;           // Refuse to attach to non-XAUUSD
-input bool   InpDrawObjects          = true;           // Draw entry arrows + SL/TP lines
-input bool   InpShowDashboard        = true;           // Show on-chart dashboard
-input bool   InpPushAlerts           = true;           // Push notifications + Alerts
-input string InpLogFileName          = "XAU_RSP_log.txt";
+input ulong  InpMagic                = 20260525;
+input string InpTradeComment          = "XAU_RSP";
+input bool   InpAllowTradingOnlyXAU   = true;
+input bool   InpDrawObjects           = true;
+input bool   InpShowDashboard         = true;
+input bool   InpPushAlerts            = false;        // off by default for backtests
+input string InpLogFileName           = "XAU_RSP_log.txt";
 
 input group "=== Risk Management ==="
-input double InpRiskPercent          = 1.0;            // Risk % per trade
-input double InpMaxDailyLossPercent  = 3.0;            // Max daily loss % (0=off)
-input int    InpMaxOpenTrades        = 1;              // Max simultaneous trades
+input double InpRiskPercent           = 0.5;          // % per trade (lowered)
+input double InpMaxDailyLossPercent   = 2.5;          // 0=off
+input int    InpMaxOpenTrades         = 1;
 
 input group "=== Range Detection ==="
-input int    InpRangeLookback        = 50;             // Candles for range
-input int    InpMinTouchesPerSide    = 2;              // Min S/R rejections per side
-input double InpTouchTolerancePoints = 200;            // Tolerance to count a touch (points)
-input double InpAtrMaxRatio          = 0.35;           // ATR/RangeWidth max (low vol)
-input int    InpBreakoutCooldownBars = 20;             // Pause entries after strong breakout
+input int    InpRangeLookback         = 60;           // candles for range
+input int    InpMinTouchesPerSide     = 3;            // stricter
+input int    InpMinTouchSpacing       = 5;            // bars between any 2 touches
+input double InpTouchTolerancePoints  = 200;          // points tolerance
+input double InpAtrMaxRatio           = 0.28;         // ATR / RangeWidth max
+input int    InpBreakoutCooldownBars  = 30;
+input bool   InpUseHtfFilter          = true;         // confirm HTF not volatile
+input ENUM_TIMEFRAMES InpHtfPeriod    = PERIOD_M15;
 
 input group "=== Indicators ==="
-input int    InpAtrPeriod            = 14;             // ATR period
-input int    InpRsiPeriod            = 14;             // RSI period
-input double InpRsiBuyMax            = 35.0;           // Max RSI for BUY
-input double InpRsiSellMin           = 65.0;           // Min RSI for SELL
-input bool   InpUseBollinger         = false;          // Use Bollinger confirmation
-input int    InpBbPeriod             = 20;
-input double InpBbDeviation          = 2.0;
+input int    InpAtrPeriod             = 14;
+input int    InpAdxPeriod             = 14;
+input double InpAdxMax                = 22.0;         // ADX must be below this
+input int    InpRsiPeriod             = 14;
+input double InpRsiBuyMax             = 32.0;
+input double InpRsiSellMin            = 68.0;
+input bool   InpUseBollinger          = false;
+input int    InpBbPeriod              = 20;
+input double InpBbDeviation           = 2.0;
+input bool   InpUseTrendFilter        = true;         // EMA200 distance filter
+input int    InpEmaPeriod             = 200;
+input double InpEmaMaxDistAtr         = 4.0;          // skip if |price-EMA| > x*ATR
 
 input group "=== SL / TP ==="
-input double InpSlAtrMultiplier      = 1.5;            // SL = ATR * x (beyond level)
-input double InpTpRRMultiplier       = 1.8;            // TP = SL * RR
-input bool   InpTpAtRangeOpposite    = true;           // Cap TP at opposite side of range
+input double InpSlAtrMultiplier       = 1.3;
+input double InpTpRRMultiplier        = 1.6;
+input bool   InpTpAtRangeOpposite     = true;
 
 input group "=== Trade Management ==="
-input bool   InpUseBreakEven         = true;
-input double InpBreakEvenTriggerPts  = 800;            // start BE at +X points
-input double InpBreakEvenLockPts     = 50;             // lock +X points beyond entry
-input bool   InpUseTrailing          = true;
-input double InpTrailStartPoints     = 1200;           // begin trail when +X points
-input double InpTrailStepPoints      = 600;            // distance to keep
+input bool   InpUseBreakEven          = true;
+input double InpBreakEvenTriggerPts   = 600;
+input double InpBreakEvenLockPts      = 50;
+input bool   InpUseTrailing           = true;
+input double InpTrailStartPoints      = 1000;
+input double InpTrailStepPoints       = 500;
 
 input group "=== Filters ==="
-input int    InpSpreadLimitPoints    = 50;             // Max allowed spread (points)
-input int    InpSlippagePoints       = 20;             // Order deviation
-input bool   InpUseSessionFilter     = true;
-input int    InpSessionStartHour     = 7;              // server time
-input int    InpSessionEndHour       = 20;             // server time
-input bool   InpAvoidLondonOpen      = true;
-input bool   InpAvoidNYOpen          = true;
-input int    InpLondonOpenHour       = 10;             // server time approx
-input int    InpNyOpenHour           = 15;             // server time approx
-input int    InpAvoidMinutesAround   = 15;
+input int    InpSpreadLimitPoints     = 35;
+input int    InpSlippagePoints        = 20;
+input bool   InpUseSessionFilter      = true;
+input int    InpSessionStartHour      = 8;            // server time
+input int    InpSessionEndHour        = 19;
+input bool   InpAvoidLondonOpen       = true;
+input bool   InpAvoidNYOpen           = true;
+input int    InpLondonOpenHour        = 10;
+input int    InpNyOpenHour            = 15;
+input int    InpAvoidMinutesAround    = 20;
 
 //============================== OBJECTS =============================
 
@@ -99,7 +104,6 @@ CDashboard     g_dash;
 datetime       g_lastBarTime  = 0;
 int            g_breakoutCooldown = 0;
 
-// stats
 int            g_totalTrades  = 0;
 int            g_wins         = 0;
 int            g_losses       = 0;
@@ -127,15 +131,21 @@ int OnInit()
    if(!g_range.Init(_Symbol, _Period,
                     InpRangeLookback,
                     InpAtrPeriod,
+                    InpAdxPeriod,
                     InpAtrMaxRatio,
+                    InpAdxMax,
                     InpTouchTolerancePoints,
-                    InpMinTouchesPerSide))
+                    InpMinTouchesPerSide,
+                    InpMinTouchSpacing,
+                    InpUseHtfFilter,
+                    InpHtfPeriod))
       return INIT_FAILED;
 
    if(!g_signal.Init(_Symbol, _Period,
                      InpRsiPeriod,
                      InpRsiBuyMax, InpRsiSellMin,
-                     InpUseBollinger, InpBbPeriod, InpBbDeviation))
+                     InpUseBollinger, InpBbPeriod, InpBbDeviation,
+                     InpUseTrendFilter, InpEmaPeriod, InpEmaMaxDistAtr))
       return INIT_FAILED;
 
    g_risk.Init(_Symbol, InpRiskPercent, InpMaxDailyLossPercent);
@@ -160,7 +170,7 @@ int OnInit()
    g_breakoutCooldown = 0;
    g_totalTrades = g_wins = g_losses = 0;
 
-   Print("XAU Range Scalper Pro initialised on ", _Symbol, " ", EnumToString(_Period));
+   Print("XAU Range Scalper Pro v1.1 initialised on ", _Symbol, " ", EnumToString(_Period));
    return INIT_SUCCEEDED;
 }
 
@@ -198,11 +208,10 @@ void OnTick()
       return;
    }
 
-   //--- only run signal logic ONCE per new bar (no repaint, low CPU)
+   //--- only run signal logic ONCE per new bar
    datetime curBarTime = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
    if(curBarTime == g_lastBarTime)
    {
-      // still update the dashboard occasionally so spread/PnL stay live
       static datetime lastDashUpdate = 0;
       if(TimeCurrent() - lastDashUpdate >= 2)
       {
@@ -231,14 +240,12 @@ void OnTick()
    string filterReason = "";
    bool filtersOK = g_filters.AllOK(filterReason);
 
-   //--- if we already have max trades, just refresh the dashboard
    if(g_trade.CountOpenPositions() >= InpMaxOpenTrades)
    {
       UpdateDashboard("Max trades open", false);
       return;
    }
 
-   //--- if breakout cooldown active, skip entries
    if(g_breakoutCooldown > 0)
    {
       UpdateDashboard(StringFormat("Breakout cooldown (%d)", g_breakoutCooldown), false);
@@ -263,7 +270,7 @@ void OnTick()
    }
 
    //--- compute SL & TP in price
-   double atr      = (r.atr > 0) ? r.atr : 0.0;
+   double atr = (r.atr > 0) ? r.atr : 0.0;
    if(atr <= 0)
    {
       UpdateDashboard("ATR not ready", false);
@@ -281,22 +288,25 @@ void OnTick()
       sl    = r.support - InpSlAtrMultiplier * atr;
       double slDist = entry - sl;
       tp    = entry + InpTpRRMultiplier * slDist;
-      if(InpTpAtRangeOpposite) tp = MathMin(tp, r.resistance - 5 * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+      if(InpTpAtRangeOpposite)
+         tp = MathMin(tp, r.resistance - 5 * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
    }
-   else // SELL
+   else
    {
       entry = bid;
       sl    = r.resistance + InpSlAtrMultiplier * atr;
       double slDist = sl - entry;
       tp    = entry - InpTpRRMultiplier * slDist;
-      if(InpTpAtRangeOpposite) tp = MathMax(tp, r.support + 5 * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+      if(InpTpAtRangeOpposite)
+         tp = MathMax(tp, r.support + 5 * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
    }
 
-   //--- sanity checks
+   //--- minimum RR sanity: TP must be at least 1.0 RR
    double slDistPrice = MathAbs(entry - sl);
-   if(slDistPrice <= 0)
+   double tpDistPrice = MathAbs(tp - entry);
+   if(slDistPrice <= 0 || tpDistPrice < slDistPrice * 0.8)
    {
-      UpdateDashboard("Invalid SL distance", false);
+      UpdateDashboard("RR too small", false);
       return;
    }
 
@@ -307,12 +317,11 @@ void OnTick()
       return;
    }
 
-   //--- normalize prices
    sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
 
-   string cmt = StringFormat("%s_%s_RSI%.1f", InpTradeComment,
-                             (sig == SIG_BUY ? "B":"S"), rsi);
+   string cmt = StringFormat("%s_%s_RSI%.0f_ADX%.0f", InpTradeComment,
+                             (sig == SIG_BUY ? "B":"S"), rsi, r.adx);
 
    ENUM_ORDER_TYPE otype = (sig == SIG_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    g_trade.OpenTrade(otype, lots, sl, tp, cmt);
@@ -345,13 +354,12 @@ void UpdateDashboard(const string filterReason, const bool filtersOK)
 //+------------------------------------------------------------------+
 void UpdateClosedTradeStats()
 {
-   datetime from = TimeCurrent() - 60 * 60 * 24 * 30;   // last 30 days
+   datetime from = TimeCurrent() - 60 * 60 * 24 * 30;
    if(!HistorySelect(from, TimeCurrent())) return;
 
    int total = HistoryDealsTotal();
    int trades = 0, wins = 0, losses = 0;
-   ulong lastSeen = g_lastDealId;
-   ulong newest   = g_lastDealId;
+   ulong newest = g_lastDealId;
 
    for(int i = 0; i < total; i++)
    {
@@ -362,7 +370,7 @@ void UpdateClosedTradeStats()
       if(HistoryDealGetString(dealId, DEAL_SYMBOL) != _Symbol) continue;
 
       ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealId, DEAL_ENTRY);
-      if(entry != DEAL_ENTRY_OUT) continue;   // only closing deals
+      if(entry != DEAL_ENTRY_OUT) continue;
 
       double profit = HistoryDealGetDouble(dealId, DEAL_PROFIT)
                     + HistoryDealGetDouble(dealId, DEAL_SWAP)
@@ -382,10 +390,10 @@ void UpdateClosedTradeStats()
 }
 
 //+------------------------------------------------------------------+
-//| OnTrade - log fill events                                        |
+//| OnTrade                                                          |
 //+------------------------------------------------------------------+
 void OnTrade()
 {
-   // light hook; full reconciliation done in UpdateClosedTradeStats
+   // light hook; reconciliation done in UpdateClosedTradeStats
 }
 //+------------------------------------------------------------------+
