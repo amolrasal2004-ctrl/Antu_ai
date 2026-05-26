@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Antu Trading"
 #property link      "https://github.com/amolrasal2004-ctrl/Antu_ai"
-#property version   "4.10"
+#property version   "4.20"
 #property strict
 #property description "ANMOL GOLDMIND AI Pro - Supply/Demand + News Reversal"
 #property description "Professional risk management, drawdown lock, visual dashboard."
@@ -56,19 +56,20 @@ input double   InpATRMultSL          = 1.5;           // ATR multiplier for SL -
 input double   InpMinRR              = 1.5;           // Minimum R:R required
 
 input group "=== SIGNAL CONFIRMATION (anti-fake-signal) ==="
-input ENUM_CONFIRM_MODE InpConfirmMode = CONFIRM_NEXT_BAR; // Confirmation mode
-input bool     InpRequireWickRej     = true;          // Require wick-rejection into zone
-input double   InpMinWickRatio       = 50.0;          // Min wick % of candle range (rejection)
-input double   InpMinBodyRatio       = 40.0;          // Min body % of candle range (strong close)
+input ENUM_CONFIRM_MODE InpConfirmMode = CONFIRM_OFF;     // Confirmation mode (start with OFF, then NEXT_BAR)
+input bool     InpRequireWickRej     = false;         // Require wick-rejection into zone
+input double   InpMinWickRatio       = 30.0;          // Min wick % of candle range (rejection)
+input double   InpMinBodyRatio       = 25.0;          // Min body % of candle range (strong close)
 input bool     InpRequireEngulf      = false;         // Require engulfing pattern
-input bool     InpUseRSIFilter       = true;          // Use RSI momentum filter
+input bool     InpUseRSIFilter       = false;         // Use RSI momentum filter
 input int      InpRSIPeriod          = 14;            // RSI period
-input double   InpRSIBuyMax          = 40.0;          // RSI must be <= this for BUY (oversold)
-input double   InpRSISellMin         = 60.0;          // RSI must be >= this for SELL (overbought)
-input bool     InpUseTrendFilter     = true;          // Higher-TF trend filter (EMA)
+input double   InpRSIBuyMax          = 50.0;          // RSI must be <= this for BUY (oversold)
+input double   InpRSISellMin         = 50.0;          // RSI must be >= this for SELL (overbought)
+input bool     InpUseTrendFilter     = false;         // Higher-TF trend filter (EMA)
 input ENUM_TIMEFRAMES InpTrendTF     = PERIOD_H1;     // Trend timeframe
 input int      InpTrendEMA           = 50;            // Trend EMA period (0=disable HTF, use only on signal TF)
-input double   InpZoneTolerancePts   = 30.0;          // Zone tap tolerance (points) - how close counts as touch
+input double   InpZoneTolerancePts   = 100.0;         // Zone tap tolerance (points) - how close counts as touch
+input bool     InpDebugLog           = true;          // Debug log: print why signal was blocked
 
 input group "=== RISK MANAGEMENT ==="
 input bool     InpAutoLot            = true;          // Auto lot from risk %
@@ -216,7 +217,7 @@ int OnInit()
 
    if(InpShowDashboard) BuildDashboard();
 
-   PrintFormat("=== ANMOL GOLDMIND AI Pro v4.00 | %s %s | Magic:%I64d ===",
+   PrintFormat("=== ANMOL GOLDMIND AI Pro v4.20 | %s %s | Magic:%I64d ===",
                _Symbol, EnumToString(InpTF), InpMagic);
    return INIT_SUCCEEDED;
 }
@@ -775,6 +776,30 @@ void TryEntries()
    bool sellSig = tappedSupply && bearRej && engulfSell && confSell && bosSell && rsiSell && trendSell;
    bool buySig  = tappedDemand && bullRej && engulfBuy  && confBuy  && bosBuy  && rsiBuy  && trendBuy;
 
+   // Debug logging (only on new bar) - shows why a potential signal was rejected
+   if(InpDebugLog)
+   {
+      static datetime s_lastDbg = 0;
+      if(s_lastDbg != iTime(_Symbol, InpTF, 0))
+      {
+         s_lastDbg = iTime(_Symbol, InpTF, 0);
+         // log only when at least zone tap is true (otherwise too noisy)
+         if(tappedSupply || tappedDemand)
+         {
+            string side = tappedSupply ? "SELL-tap" : "BUY-tap";
+            PrintFormat("[DBG %s] tapS=%d tapD=%d bearRej=%d bullRej=%d engB=%d engS=%d cnfB=%d cnfS=%d bosB=%d bosS=%d rsi=%.1f rsiB=%d rsiS=%d trB=%d trS=%d",
+                        side,
+                        tappedSupply, tappedDemand,
+                        bearRej, bullRej,
+                        engulfBuy, engulfSell,
+                        confBuy, confSell,
+                        bosBuy, bosSell,
+                        rsi, rsiBuy, rsiSell,
+                        trendBuy, trendSell);
+         }
+      }
+   }
+
    bool isNewsSell = sellSig && spikeBull && timeOk;
    bool isNewsBuy  = buySig  && spikeBear && timeOk;
 
@@ -1132,7 +1157,7 @@ void BuildDashboard()
    int x = 14, y = 22, w = 290, h = 430;
    MakeBox(PFX + "panel",  x, y, w, h, InpClrBg, clrSlateGray);
    MakeBox(PFX + "header", x, y, w, 28, clrDarkSlateGray, clrSlateGray);
-   MakeLabel(PFX + "title", x + 10, y + 6, "ANMOL GOLDMIND AI Pro v4.10", InpClrText, 10, "Consolas Bold");
+   MakeLabel(PFX + "title", x + 10, y + 6, "ANMOL GOLDMIND AI Pro v4.20", InpClrText, 10, "Consolas Bold");
    UpdateDashboard();
 }
 
