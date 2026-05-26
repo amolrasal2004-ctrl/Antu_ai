@@ -2,13 +2,14 @@
 //|                       ANMOL GOLDMIND AI Pro - MT5 EA             |
 //|                                       Copyright "Antu Trading"   |
 //|     Professional Supply/Demand + News EA with full DD control    |
+//|                       v4.30 - Tuned defaults, fast backtest      |
 //+------------------------------------------------------------------+
 #property copyright "Antu Trading"
 #property link      "https://github.com/amolrasal2004-ctrl/Antu_ai"
-#property version   "4.20"
+#property version   "4.30"
 #property strict
 #property description "ANMOL GOLDMIND AI Pro - Supply/Demand + News Reversal"
-#property description "Professional risk management, drawdown lock, visual dashboard."
+#property description "Tuned defaults: NEXT_BAR confirm + wick rej + RSI + H1 trend"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -38,108 +39,108 @@ enum ENUM_SL_MODE
 
 enum ENUM_CONFIRM_MODE
 {
-   CONFIRM_OFF       = 0, // OFF - immediate signal (old behavior)
-   CONFIRM_NEXT_BAR  = 1, // Wait 1 bar for confirmation close
-   CONFIRM_BOS       = 2, // Wait for break of structure (mini swing)
-   CONFIRM_STRICT    = 3  // BOTH next-bar AND BOS (safest, fewer trades)
+   CONFIRM_OFF       = 0, // OFF - immediate (early entries)
+   CONFIRM_NEXT_BAR  = 1, // Wait 1 bar confirm (RECOMMENDED)
+   CONFIRM_BOS       = 2, // Break of structure
+   CONFIRM_STRICT    = 3  // BOTH next-bar + BOS (safest)
 };
 
 //+------------------------------------------------------------------+
-//| INPUTS                                                           |
+//| INPUTS - all defaults are TUNED for XAUUSD M5                    |
 //+------------------------------------------------------------------+
 input group "=== STRATEGY ==="
 input ENUM_TIMEFRAMES InpTF          = PERIOD_M5;     // Timeframe
 input int      InpPivotLength        = 15;            // Pivot length
 input ENUM_SL_MODE InpSLMode         = SL_FIXED_BUFFER;// Stop loss mode
-input double   InpSLBufferPts        = 150.0;         // SL buffer (points) - fixed mode
-input double   InpATRMultSL          = 1.5;           // ATR multiplier for SL - ATR mode
-input double   InpMinRR              = 1.5;           // Minimum R:R required
+input double   InpSLBufferPts        = 200.0;         // SL buffer (points) - fixed
+input double   InpATRMultSL          = 1.5;           // ATR multiplier for SL
+input double   InpMinRR              = 1.5;           // Min R:R required
 
 input group "=== SIGNAL CONFIRMATION (anti-fake-signal) ==="
-input ENUM_CONFIRM_MODE InpConfirmMode = CONFIRM_OFF;     // Confirmation mode (start with OFF, then NEXT_BAR)
-input bool     InpRequireWickRej     = false;         // Require wick-rejection into zone
-input double   InpMinWickRatio       = 30.0;          // Min wick % of candle range (rejection)
-input double   InpMinBodyRatio       = 25.0;          // Min body % of candle range (strong close)
-input bool     InpRequireEngulf      = false;         // Require engulfing pattern
-input bool     InpUseRSIFilter       = false;         // Use RSI momentum filter
+input ENUM_CONFIRM_MODE InpConfirmMode = CONFIRM_NEXT_BAR; // Confirmation mode
+input bool     InpRequireWickRej     = true;          // Require wick rejection
+input double   InpMinWickRatio       = 40.0;          // Min wick % of range
+input double   InpMinBodyRatio       = 30.0;          // Min body % of range
+input bool     InpRequireEngulf      = false;         // Require engulfing
+input bool     InpUseRSIFilter       = true;          // RSI momentum filter
 input int      InpRSIPeriod          = 14;            // RSI period
-input double   InpRSIBuyMax          = 50.0;          // RSI must be <= this for BUY (oversold)
-input double   InpRSISellMin         = 50.0;          // RSI must be >= this for SELL (overbought)
-input bool     InpUseTrendFilter     = false;         // Higher-TF trend filter (EMA)
+input double   InpRSIBuyMax          = 35.0;          // RSI <= for BUY (oversold)
+input double   InpRSISellMin         = 65.0;          // RSI >= for SELL (overbought)
+input bool     InpUseTrendFilter     = true;          // HTF EMA trend filter
 input ENUM_TIMEFRAMES InpTrendTF     = PERIOD_H1;     // Trend timeframe
-input int      InpTrendEMA           = 50;            // Trend EMA period (0=disable HTF, use only on signal TF)
-input double   InpZoneTolerancePts   = 100.0;         // Zone tap tolerance (points) - how close counts as touch
-input bool     InpDebugLog           = true;          // Debug log: print why signal was blocked
+input int      InpTrendEMA           = 50;            // Trend EMA period
+input double   InpZoneTolerancePts   = 50.0;          // Zone tap tolerance (pts)
 
 input group "=== RISK MANAGEMENT ==="
 input bool     InpAutoLot            = true;          // Auto lot from risk %
 input double   InpRiskPercent        = 1.0;           // Risk % per trade
-input double   InpFixedLot           = 0.01;          // Fixed lot (when AutoLot=false)
+input double   InpFixedLot           = 0.01;          // Fixed lot
 input double   InpMaxLot             = 1.00;          // Hard lot cap
 input int      InpMaxOpenPositions   = 1;             // Max concurrent positions
 
 input group "=== DRAWDOWN PROTECTION ==="
-input bool     InpUseDailyLoss       = true;          // Enable daily loss lock
-input double   InpMaxDailyLossPct    = 3.0;           // Max daily loss % (of start-of-day balance)
-input bool     InpUseEquityDD        = true;          // Enable equity DD lock
-input double   InpMaxEquityDDPct     = 8.0;           // Max equity DD % (from peak)
-input bool     InpCloseAllOnDDLock   = true;          // Close all on DD lock hit
-input int      InpMaxLossesPerDay    = 4;             // Stop after N losses today (0=off)
-input int      InpCooldownAfterLossM = 30;            // Cooldown minutes after a loss
+input bool     InpUseDailyLoss       = true;          // Daily loss lock
+input double   InpMaxDailyLossPct    = 3.0;           // Max daily loss %
+input bool     InpUseEquityDD        = true;          // Equity DD lock
+input double   InpMaxEquityDDPct     = 8.0;           // Max equity DD %
+input bool     InpCloseAllOnDDLock   = true;          // Close all on lock
+input int      InpMaxLossesPerDay    = 4;             // Stop after N losses (0=off)
+input int      InpCooldownAfterLossM = 30;            // Cooldown minutes
 
 input group "=== TRAILING & BREAKEVEN ==="
-input bool     InpUseTrailing        = true;          // Trailing stop ON/OFF
-input double   InpBreakevenAtPts     = 100.0;         // Move SL to BE after X points
-input double   InpBreakevenLockPts   = 10.0;          // Lock X points profit at BE
-input double   InpTrailStartPts      = 150.0;         // Start trailing after X points
-input double   InpTrailStepPts       = 50.0;          // Trail step (points)
+input bool     InpUseTrailing        = true;          // Trailing stop
+input double   InpBreakevenAtPts     = 100.0;         // BE at X pts profit
+input double   InpBreakevenLockPts   = 10.0;          // BE lock pts
+input double   InpTrailStartPts      = 150.0;         // Trail start pts
+input double   InpTrailStepPts       = 50.0;          // Trail step pts
 
 input group "=== PARTIAL PROFIT ==="
-input bool     InpUsePartial         = true;          // Partial close ON/OFF
-input double   InpP1Pts              = 150.0;         // 1st partial trigger (points)
-input double   InpP1Pct              = 40.0;          // 1st partial close %
-input double   InpP2Pts              = 300.0;         // 2nd partial trigger (points)
-input double   InpP2Pct              = 30.0;          // 2nd partial close %
+input bool     InpUsePartial         = true;          // Partial close
+input double   InpP1Pts              = 150.0;         // 1st partial trigger
+input double   InpP1Pct              = 40.0;          // 1st partial %
+input double   InpP2Pts              = 300.0;         // 2nd partial trigger
+input double   InpP2Pct              = 30.0;          // 2nd partial %
 
 input group "=== FILTERS ==="
-input double   InpMaxSpreadPts       = 40.0;          // Max spread (points) to trade
-input bool     InpUseSessionFilter   = false;         // Restrict to session hours
-input int      InpSessionStartHour   = 7;             // Session start hour (server time)
-input int      InpSessionEndHour     = 22;            // Session end hour (server time)
-input bool     InpFridayCloseEarly   = true;          // Close all Friday end-of-day
+input double   InpMaxSpreadPts       = 50.0;          // Max spread (pts)
+input bool     InpUseSessionFilter   = false;         // Session hours
+input int      InpSessionStartHour   = 7;             // Start hour
+input int      InpSessionEndHour     = 22;            // End hour
+input bool     InpFridayCloseEarly   = true;          // Friday close
 input int      InpFridayCloseHour    = 21;            // Friday close hour
 
 input group "=== NEWS ==="
-input ENUM_NEWS_MODE InpNewsMode     = NEWS_BOOST;    // News mode
-input double   InpATRMultSpike       = 2.0;           // ATR multiplier for spike
-input string   InpNewsTime1          = "08:30";       // News time 1
-input string   InpNewsTime2          = "14:00";       // News time 2
-input string   InpNewsTime3          = "15:00";       // News time 3
-input string   InpNewsTime4          = "18:30";       // News time 4
-input int      InpNewsWindowMin      = 15;            // ± minutes window
+input ENUM_NEWS_MODE InpNewsMode     = NEWS_BLOCK;    // News mode (BLOCK is safer)
+input double   InpATRMultSpike       = 2.0;           // ATR x for spike
+input string   InpNewsTime1          = "08:30";       // News 1
+input string   InpNewsTime2          = "14:00";       // News 2
+input string   InpNewsTime3          = "15:00";       // News 3
+input string   InpNewsTime4          = "18:30";       // News 4
+input int      InpNewsWindowMin      = 15;            // Window minutes
 
 input group "=== DASHBOARD & ALERTS ==="
-input bool     InpShowDashboard      = true;          // Show graphical dashboard
-input bool     InpShowZones          = true;          // Draw zones on chart
-input bool     InpAlertPopup         = true;          // Popup on entry
-input bool     InpAlertPush          = false;         // Push notification
-input bool     InpAlertSound         = true;          // Play sound on entry
-input color    InpClrBg              = clrBlack;      // Panel background
-input color    InpClrText            = clrWhite;      // Panel text color
-input color    InpClrBuy             = clrLime;       // Buy color
-input color    InpClrSell            = clrRed;        // Sell color
-input color    InpClrWarn            = clrGold;       // Warning color
-input color    InpClrSupply          = clrCrimson;    // Supply zone color
-input color    InpClrDemand          = clrSeaGreen;   // Demand zone color
+input bool     InpShowDashboard      = true;          // Show dashboard (live only)
+input bool     InpShowZones          = true;          // Draw zones (live only)
+input bool     InpAlertPopup         = false;         // Popup (slow in tester)
+input bool     InpAlertPush          = false;         // Push notif
+input bool     InpAlertSound         = false;         // Sound
+input color    InpClrBg              = clrBlack;
+input color    InpClrText            = clrWhite;
+input color    InpClrBuy             = clrLime;
+input color    InpClrSell            = clrRed;
+input color    InpClrWarn            = clrGold;
+input color    InpClrSupply          = clrCrimson;
+input color    InpClrDemand          = clrSeaGreen;
 
 input group "=== GENERAL ==="
 input long     InpMagic              = 202604;        // Magic number
-input string   InpComment            = "ANMOL_GMIND"; // Trade comment prefix
+input string   InpComment            = "ANMOL_GMIND"; // Trade comment
+input bool     InpDebugLog           = false;         // Debug log (off for speed!)
 
 //+------------------------------------------------------------------+
 //| GLOBALS                                                          |
 //+------------------------------------------------------------------+
-const string PFX = "AGM_";   // object name prefix
+const string PFX = "AGM_";
 
 double   g_supplyTop = 0, g_supplyBot = 0;
 double   g_demandTop = 0, g_demandBot = 0;
@@ -153,7 +154,6 @@ double   g_lastEntry = 0, g_lastSL = 0, g_lastTP = 0, g_lastRR = 0;
 bool     g_newsBoost = false;
 datetime g_lastBar   = 0;
 
-// DD / journal
 double   g_dayStartBalance = 0;
 datetime g_currentDay      = 0;
 double   g_equityPeak      = 0;
@@ -162,24 +162,23 @@ string   g_ddLockReason    = "";
 int      g_lossesToday     = 0;
 datetime g_lastLossTime    = 0;
 
-// stats
 int      g_totalTrades = 0, g_wins = 0, g_losses = 0;
 double   g_grossProfit = 0, g_grossLoss = 0;
 
-// per-position partial tracking (ticket -> flags)
 ulong    g_p1Tickets[];
 ulong    g_p2Tickets[];
+
+bool     g_isTester = false;          // skip dashboard/visuals when true
+int      g_dashboardCounter = 0;      // throttle dashboard updates
 
 //+------------------------------------------------------------------+
 //| INIT                                                             |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(!sym.Name(_Symbol))
-   {
-      Print("Symbol init failed");
-      return INIT_FAILED;
-   }
+   g_isTester = (bool)MQLInfoInteger(MQL_TESTER) || (bool)MQLInfoInteger(MQL_OPTIMIZATION);
+
+   if(!sym.Name(_Symbol)) { Print("Symbol init failed"); return INIT_FAILED; }
    sym.Refresh();
    sym.RefreshRates();
 
@@ -188,18 +187,13 @@ int OnInit()
    trade.SetMarginMode();
    trade.LogLevel(LOG_LEVEL_ERRORS);
 
-   // auto-detect filling mode
    long fmode = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
    if((fmode & SYMBOL_FILLING_FOK) != 0)        trade.SetTypeFilling(ORDER_FILLING_FOK);
    else if((fmode & SYMBOL_FILLING_IOC) != 0)   trade.SetTypeFilling(ORDER_FILLING_IOC);
    else                                         trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
    g_atrHandle = iATR(_Symbol, InpTF, 14);
-   if(g_atrHandle == INVALID_HANDLE)
-   {
-      Print("ATR handle failed");
-      return INIT_FAILED;
-   }
+   if(g_atrHandle == INVALID_HANDLE) { Print("ATR handle failed"); return INIT_FAILED; }
 
    if(InpUseRSIFilter)
    {
@@ -215,10 +209,11 @@ int OnInit()
    ResetDay(true);
    g_equityPeak = AccountInfoDouble(ACCOUNT_EQUITY);
 
-   if(InpShowDashboard) BuildDashboard();
+   // Build dashboard only when not in tester (saves backtest time)
+   if(InpShowDashboard && !g_isTester) BuildDashboard();
 
-   PrintFormat("=== ANMOL GOLDMIND AI Pro v4.20 | %s %s | Magic:%I64d ===",
-               _Symbol, EnumToString(InpTF), InpMagic);
+   PrintFormat("=== ANMOL GOLDMIND AI Pro v4.30 | %s %s | Magic:%I64d | Tester:%s ===",
+               _Symbol, EnumToString(InpTF), InpMagic, g_isTester ? "YES" : "NO");
    return INIT_SUCCEEDED;
 }
 
@@ -230,7 +225,7 @@ void OnDeinit(const int reason)
    if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
    if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
    if(g_emaHandle != INVALID_HANDLE) IndicatorRelease(g_emaHandle);
-   ObjectsDeleteAll(0, PFX);
+   if(!g_isTester) ObjectsDeleteAll(0, PFX);
    Comment("");
 }
 
@@ -245,42 +240,46 @@ void OnTick()
    UpdateEquityPeak();
    CheckDrawdownLocks();
 
-   // Manage existing positions every tick
-   if(CountOurPositions() > 0)
+   bool havePos = (CountOurPositions() > 0);
+
+   if(havePos)
    {
       ManagePartial();
       ManageTrailing();
    }
 
-   // Friday early close
-   if(InpFridayCloseEarly && IsFridayCloseTime())
+   if(InpFridayCloseEarly && IsFridayCloseTime() && havePos)
       CloseAllOurPositions("Friday close");
 
-   if(InpShowDashboard) UpdateDashboard();
+   // Dashboard: live only, throttled to every 30 ticks for performance
+   if(InpShowDashboard && !g_isTester)
+   {
+      if(++g_dashboardCounter >= 30) { g_dashboardCounter = 0; UpdateDashboard(); }
+   }
 
-   // Block new entries if locked
+   // entry guards
    if(g_ddLocked) return;
    if(!IsTradingAllowed()) return;
-   if(CountOurPositions() >= InpMaxOpenPositions) return;
+   if(havePos && CountOurPositions() >= InpMaxOpenPositions) return;
    if(InCooldown()) return;
    if(InpUseSessionFilter && !InSession()) return;
    if(InpNewsMode == NEWS_BLOCK && IsNewsTime()) return;
    if(GetSpreadPts() > InpMaxSpreadPts) return;
 
-   // New-bar gate
+   // new bar gate (single-shot per candle)
    datetime curBar = iTime(_Symbol, InpTF, 0);
    if(curBar == g_lastBar) return;
-   g_lastBar = curBar; // advance regardless of entry outcome
+   g_lastBar = curBar;
 
    UpdateZones();
-   if(InpShowZones) DrawZones();
+   if(InpShowZones && !g_isTester) DrawZones();
    if(g_supplyTop <= 0 || g_demandBot <= 0) return;
 
    TryEntries();
 }
 
 //+------------------------------------------------------------------+
-//| TRADE EVENT (track wins/losses for cooldown + stats)             |
+//| TRADE TRANSACTION (stats + cooldown)                             |
 //+------------------------------------------------------------------+
 void OnTradeTransaction(const MqlTradeTransaction &t,
                         const MqlTradeRequest    &req,
@@ -299,11 +298,8 @@ void OnTradeTransaction(const MqlTradeTransaction &t,
                  + HistoryDealGetDouble(t.deal, DEAL_COMMISSION);
 
    g_totalTrades++;
-   if(profit >= 0) { g_wins++;   g_grossProfit += profit; }
-   else            { g_losses++; g_grossLoss   += -profit;
-                     g_lossesToday++;
-                     g_lastLossTime = TimeCurrent();
-                   }
+   if(profit >= 0) { g_wins++; g_grossProfit += profit; }
+   else { g_losses++; g_grossLoss += -profit; g_lossesToday++; g_lastLossTime = TimeCurrent(); }
 }
 
 //+------------------------------------------------------------------+
@@ -311,12 +307,10 @@ void OnTradeTransaction(const MqlTradeTransaction &t,
 //+------------------------------------------------------------------+
 double GetPivotHigh(int length)
 {
-   // pivot is at shift = length+1 (so we have `length` bars on each side)
    int need = length * 2 + 2;
    double h[];
    ArraySetAsSeries(h, true);
    if(CopyHigh(_Symbol, InpTF, 0, need, h) < need) return 0;
-
    int mid = length + 1;
    double pv = h[mid];
    for(int i = 1; i <= length; i++)
@@ -333,7 +327,6 @@ double GetPivotLow(int length)
    double l[];
    ArraySetAsSeries(l, true);
    if(CopyLow(_Symbol, InpTF, 0, need, l) < need) return 0;
-
    int mid = length + 1;
    double pv = l[mid];
    for(int i = 1; i <= length; i++)
@@ -349,7 +342,6 @@ void UpdateZones()
    double ph = GetPivotHigh(InpPivotLength);
    if(ph > 0)
    {
-      // body of the pivot bar itself defines bottom of supply zone
       double c[], o[];
       ArraySetAsSeries(c, true); ArraySetAsSeries(o, true);
       if(CopyClose(_Symbol, InpTF, InpPivotLength + 1, 1, c) == 1 &&
@@ -359,7 +351,6 @@ void UpdateZones()
          g_supplyBot = MathMax(c[0], o[0]);
       }
    }
-
    double pl = GetPivotLow(InpPivotLength);
    if(pl > 0)
    {
@@ -375,7 +366,7 @@ void UpdateZones()
 }
 
 //+------------------------------------------------------------------+
-//| SESSION / NEWS / TIME HELPERS                                    |
+//| TIME / SESSION HELPERS                                           |
 //+------------------------------------------------------------------+
 bool InSession()
 {
@@ -395,7 +386,6 @@ bool IsNewsTime()
    if(InpNewsMode == NEWS_OFF) return false;
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
    int cur = dt.hour * 60 + dt.min;
-
    string times[4] = {InpNewsTime1, InpNewsTime2, InpNewsTime3, InpNewsTime4};
    for(int i = 0; i < 4; i++)
    {
@@ -412,12 +402,10 @@ bool IsNewsSpike(int shift)
    double atr[];
    ArraySetAsSeries(atr, true);
    if(CopyBuffer(g_atrHandle, 0, shift, 1, atr) < 1) return false;
-
    double o[], c[];
    ArraySetAsSeries(o, true); ArraySetAsSeries(c, true);
    if(CopyOpen (_Symbol, InpTF, shift, 1, o) < 1) return false;
    if(CopyClose(_Symbol, InpTF, shift, 1, c) < 1) return false;
-
    return MathAbs(c[0] - o[0]) >= (atr[0] * InpATRMultSpike);
 }
 
@@ -445,36 +433,28 @@ double GetEMA(int shift)
 }
 
 //+------------------------------------------------------------------+
-//| CANDLE ANALYSIS HELPERS                                          |
+//| CANDLE PATTERNS                                                  |
 //+------------------------------------------------------------------+
 double CandleRange(double h, double l) { return MathMax(h - l, _Point); }
 double CandleBody(double o, double c)  { return MathAbs(c - o); }
 double UpperWick(double h, double o, double c) { return h - MathMax(o, c); }
 double LowerWick(double l, double o, double c) { return MathMin(o, c) - l; }
 
-// Bullish rejection at demand: lower wick big, body bullish closing above zone-bottom area
 bool IsBullishRejection(double o, double c, double h, double l, double zoneTop, double zoneBot)
 {
-   double rng  = CandleRange(h, l);
-   double body = CandleBody(o, c);
-   double lwk  = LowerWick(l, o, c);
-
+   double rng = CandleRange(h, l), body = CandleBody(o, c), lwk = LowerWick(l, o, c);
    bool wickOk = (lwk / rng * 100.0) >= InpMinWickRatio;
    bool bodyOk = (body / rng * 100.0) >= InpMinBodyRatio;
    bool bullClose = c > o;
-   bool wickedZone = l <= zoneTop;             // wick dipped into zone
-   bool closedAbove = c > zoneBot;             // body closed back above zone bottom
+   bool wickedZone = l <= zoneTop;
+   bool closedAbove = c > zoneBot;
    if(InpRequireWickRej) return wickOk && bodyOk && bullClose && wickedZone && closedAbove;
    return bodyOk && bullClose && wickedZone;
 }
 
-// Bearish rejection at supply
 bool IsBearishRejection(double o, double c, double h, double l, double zoneTop, double zoneBot)
 {
-   double rng  = CandleRange(h, l);
-   double body = CandleBody(o, c);
-   double uwk  = UpperWick(h, o, c);
-
+   double rng = CandleRange(h, l), body = CandleBody(o, c), uwk = UpperWick(h, o, c);
    bool wickOk = (uwk / rng * 100.0) >= InpMinWickRatio;
    bool bodyOk = (body / rng * 100.0) >= InpMinBodyRatio;
    bool bearClose = c < o;
@@ -485,19 +465,11 @@ bool IsBearishRejection(double o, double c, double h, double l, double zoneTop, 
 }
 
 bool IsBullEngulf(double o1, double c1, double o2, double c2)
-{
-   return (c2 < o2) && (c1 > o1) && (c1 >= o2) && (o1 <= c2);
-}
+{ return (c2 < o2) && (c1 > o1) && (c1 >= o2) && (o1 <= c2); }
 
 bool IsBearEngulf(double o1, double c1, double o2, double c2)
-{
-   return (c2 > o2) && (c1 < o1) && (c1 <= o2) && (o1 >= c2);
-}
+{ return (c2 > o2) && (c1 < o1) && (c1 <= o2) && (o1 >= c2); }
 
-//+------------------------------------------------------------------+
-//| BREAK OF STRUCTURE (BOS)                                         |
-//+------------------------------------------------------------------+
-// For BUY at demand: previous candle low must hold AND current closes above prev high
 bool BullishBOS(int signalShift)
 {
    double h[], l[], c[];
@@ -505,7 +477,6 @@ bool BullishBOS(int signalShift)
    if(CopyHigh (_Symbol, InpTF, signalShift - 1, 4, h) < 4) return false;
    if(CopyLow  (_Symbol, InpTF, signalShift - 1, 4, l) < 4) return false;
    if(CopyClose(_Symbol, InpTF, signalShift - 1, 1, c) < 1) return false;
-   // h[0]=signalShift-1 (newer), h[1]=signalShift, h[2..3]=older
    double prevHigh = MathMax(h[1], MathMax(h[2], h[3]));
    return c[0] > prevHigh;
 }
@@ -521,9 +492,6 @@ bool BearishBOS(int signalShift)
    return c[0] < prevLow;
 }
 
-//+------------------------------------------------------------------+
-//| TREND FILTER (HTF EMA)                                           |
-//+------------------------------------------------------------------+
 bool TrendAllowsBuy()
 {
    if(!InpUseTrendFilter || InpTrendEMA <= 0) return true;
@@ -540,17 +508,17 @@ bool TrendAllowsSell()
    return SymbolInfoDouble(_Symbol, SYMBOL_BID) <= ema;
 }
 
-double GetSpreadPts()
-{
-   return (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-}
+//+------------------------------------------------------------------+
+//| GUARDS                                                           |
+//+------------------------------------------------------------------+
+double GetSpreadPts() { return (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD); }
 
 bool IsTradingAllowed()
 {
-   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))                          return false;
-   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))                return false;
-   if(!AccountInfoInteger(ACCOUNT_TRADE_EXPERT))                   return false;
-   if(!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))                  return false;
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))            return false;
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))  return false;
+   if(!AccountInfoInteger(ACCOUNT_TRADE_EXPERT))     return false;
+   if(!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))    return false;
    return true;
 }
 
@@ -562,17 +530,16 @@ bool InCooldown()
 }
 
 //+------------------------------------------------------------------+
-//| DAILY ROLLOVER                                                   |
+//| DAILY ROLLOVER & DD LOCK                                         |
 //+------------------------------------------------------------------+
 void ResetDay(bool firstInit = false)
 {
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
    dt.hour = 0; dt.min = 0; dt.sec = 0;
-   g_currentDay      = StructToTime(dt);
+   g_currentDay = StructToTime(dt);
    g_dayStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-   g_lossesToday     = 0;
-   g_lastLossTime    = 0;
-   if(!firstInit) PrintFormat("New trading day. Start balance: %.2f", g_dayStartBalance);
+   g_lossesToday = 0;
+   g_lastLossTime = 0;
 }
 
 void RolloverDayIfNeeded()
@@ -588,9 +555,6 @@ void RolloverDayIfNeeded()
    }
 }
 
-//+------------------------------------------------------------------+
-//| DRAWDOWN PROTECTION                                              |
-//+------------------------------------------------------------------+
 void UpdateEquityPeak()
 {
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -600,47 +564,28 @@ void UpdateEquityPeak()
 void CheckDrawdownLocks()
 {
    if(g_ddLocked) return;
-
-   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
-
-   // Daily loss
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(InpUseDailyLoss && g_dayStartBalance > 0)
    {
       double dayPnL = eq - g_dayStartBalance;
       double maxLoss = g_dayStartBalance * InpMaxDailyLossPct / 100.0;
-      if(dayPnL <= -maxLoss)
-      {
-         LockDD(StringFormat("DAILY LOSS LIMIT (%.2f%%)", InpMaxDailyLossPct));
-         return;
-      }
+      if(dayPnL <= -maxLoss) { LockDD(StringFormat("DAILY LOSS %.2f%%", InpMaxDailyLossPct)); return; }
    }
-
-   // Equity DD from peak
    if(InpUseEquityDD && g_equityPeak > 0)
    {
       double ddPct = (g_equityPeak - eq) / g_equityPeak * 100.0;
-      if(ddPct >= InpMaxEquityDDPct)
-      {
-         LockDD(StringFormat("EQUITY DD LIMIT (%.2f%%)", InpMaxEquityDDPct));
-         return;
-      }
+      if(ddPct >= InpMaxEquityDDPct) { LockDD(StringFormat("EQ DD %.2f%%", InpMaxEquityDDPct)); return; }
    }
-
-   // Max losses today
    if(InpMaxLossesPerDay > 0 && g_lossesToday >= InpMaxLossesPerDay)
-   {
-      LockDD(StringFormat("MAX LOSSES TODAY (%d)", InpMaxLossesPerDay));
-      return;
-   }
+   { LockDD(StringFormat("MAX LOSSES %d", InpMaxLossesPerDay)); return; }
 }
 
 void LockDD(string reason)
 {
-   g_ddLocked     = true;
+   g_ddLocked = true;
    g_ddLockReason = reason;
-   PrintFormat("DD LOCK ACTIVATED: %s", reason);
-   if(InpAlertPopup) Alert("ANMOL EA: TRADING LOCKED - ", reason);
+   PrintFormat("DD LOCK: %s", reason);
+   if(InpAlertPopup && !g_isTester) Alert("ANMOL EA LOCKED: ", reason);
    if(InpCloseAllOnDDLock) CloseAllOurPositions(reason);
 }
 
@@ -665,37 +610,8 @@ void CloseAllOurPositions(string why)
       if(!pos.SelectByIndex(i)) continue;
       if(pos.Magic() != InpMagic || pos.Symbol() != _Symbol) continue;
       ulong tk = pos.Ticket();
-      if(trade.PositionClose(tk))
-         PrintFormat("Closed #%I64u (%s)", tk, why);
+      if(trade.PositionClose(tk)) PrintFormat("Closed #%I64u (%s)", tk, why);
    }
-}
-
-//+------------------------------------------------------------------+
-//| LOT CALCULATION                                                  |
-//+------------------------------------------------------------------+
-double CalcLot(double slPoints)
-{
-   double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   double volMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double volMax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double cap     = MathMin(volMax, InpMaxLot);
-
-   if(!InpAutoLot || slPoints <= 0)
-      return NormalizeVolume(InpFixedLot, volMin, cap, volStep);
-
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskAmt = balance * InpRiskPercent / 100.0;
-   double tickVal = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-
-   if(tickVal <= 0 || tickSz <= 0 || point <= 0) return volMin;
-
-   double pointValuePerLot = tickVal * (point / tickSz); // $/point/lot
-   if(pointValuePerLot <= 0) return volMin;
-
-   double lots = riskAmt / (slPoints * pointValuePerLot);
-   return NormalizeVolume(lots, volMin, cap, volStep);
 }
 
 double NormalizeVolume(double v, double mn, double mx, double step)
@@ -707,6 +623,26 @@ double NormalizeVolume(double v, double mn, double mx, double step)
    return NormalizeDouble(v, 2);
 }
 
+double CalcLot(double slPoints)
+{
+   double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   double volMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double volMax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double cap = MathMin(volMax, InpMaxLot);
+   if(!InpAutoLot || slPoints <= 0)
+      return NormalizeVolume(InpFixedLot, volMin, cap, volStep);
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double risk = bal * InpRiskPercent / 100.0;
+   double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double pt = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(tv <= 0 || ts <= 0 || pt <= 0) return volMin;
+   double pvpl = tv * (pt / ts);
+   if(pvpl <= 0) return volMin;
+   double lots = risk / (slPoints * pvpl);
+   return NormalizeVolume(lots, volMin, cap, volStep);
+}
+
 //+------------------------------------------------------------------+
 //| ENTRY LOGIC                                                      |
 //+------------------------------------------------------------------+
@@ -715,89 +651,60 @@ void TryEntries()
    double c[], o[], h[], l[];
    ArraySetAsSeries(c, true); ArraySetAsSeries(o, true);
    ArraySetAsSeries(h, true); ArraySetAsSeries(l, true);
-
    if(CopyClose(_Symbol, InpTF, 0, 6, c) < 6) return;
    if(CopyOpen (_Symbol, InpTF, 0, 6, o) < 6) return;
    if(CopyHigh (_Symbol, InpTF, 0, 6, h) < 6) return;
    if(CopyLow  (_Symbol, InpTF, 0, 6, l) < 6) return;
 
-   // Confirmation mode decides which candle is the "signal" and which is "confirmation"
-   // - CONFIRM_OFF       : signal=index 1 (last closed), no confirm needed
-   // - CONFIRM_NEXT_BAR  : signal=index 2, confirmation=index 1
-   // - CONFIRM_BOS       : signal=index 1, BOS via current close
-   // - CONFIRM_STRICT    : signal=index 2, confirmation=index 1 + BOS
    bool needConfirmBar = (InpConfirmMode == CONFIRM_NEXT_BAR || InpConfirmMode == CONFIRM_STRICT);
    bool needBOS        = (InpConfirmMode == CONFIRM_BOS      || InpConfirmMode == CONFIRM_STRICT);
    int  sigIdx         = needConfirmBar ? 2 : 1;
-   int  confIdx        = 1;   // candle that confirms
+   int  confIdx        = 1;
 
    double oS = o[sigIdx], cS = c[sigIdx], hS = h[sigIdx], lS = l[sigIdx];
-   double oP = o[sigIdx + 1], cP = c[sigIdx + 1]; // candle BEFORE signal
+   double oP = o[sigIdx + 1], cP = c[sigIdx + 1];
    double oC = o[confIdx], cC = c[confIdx];
 
-   double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double tol     = InpZoneTolerancePts * point;
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double tol   = InpZoneTolerancePts * point;
 
-   // Zone tap with tolerance (price came close enough, doesn't need to pierce exactly)
    bool tappedSupply = (hS >= g_supplyBot - tol) && (cS <= g_supplyTop + tol);
    bool tappedDemand = (lS <= g_demandTop + tol) && (cS >= g_demandBot - tol);
 
-   // Rejection candles
    bool bearRej = IsBearishRejection(oS, cS, hS, lS, g_supplyTop, g_supplyBot);
    bool bullRej = IsBullishRejection(oS, cS, hS, lS, g_demandTop, g_demandBot);
 
-   // Engulfing requirement
    bool engulfBuy  = !InpRequireEngulf || IsBullEngulf(oS, cS, oP, cP);
    bool engulfSell = !InpRequireEngulf || IsBearEngulf(oS, cS, oP, cP);
 
-   // Confirmation candle: must close in same direction as the signal
-   bool confBuy   = !needConfirmBar || (cC > oC && cC > cS);   // bullish conf closing above signal close
-   bool confSell  = !needConfirmBar || (cC < oC && cC < cS);   // bearish conf closing below signal close
+   bool confBuy   = !needConfirmBar || (cC > oC && cC > cS);
+   bool confSell  = !needConfirmBar || (cC < oC && cC < cS);
 
-   // BOS (use signal's relevant index)
    bool bosBuy    = !needBOS || BullishBOS(sigIdx);
    bool bosSell   = !needBOS || BearishBOS(sigIdx);
 
-   // RSI
-   double rsi     = GetRSI(sigIdx);
-   bool rsiBuy    = !InpUseRSIFilter || rsi <= InpRSIBuyMax;
-   bool rsiSell   = !InpUseRSIFilter || rsi >= InpRSISellMin;
+   double rsi = (InpUseRSIFilter ? GetRSI(sigIdx) : 50.0);
+   bool rsiBuy  = !InpUseRSIFilter || rsi <= InpRSIBuyMax;
+   bool rsiSell = !InpUseRSIFilter || rsi >= InpRSISellMin;
 
-   // Trend
    bool trendBuy  = TrendAllowsBuy();
    bool trendSell = TrendAllowsSell();
 
-   // News
    bool spikeBull = (InpNewsMode == NEWS_BOOST) && IsNewsSpike(sigIdx + 1) && (cP > oP);
    bool spikeBear = (InpNewsMode == NEWS_BOOST) && IsNewsSpike(sigIdx + 1) && (cP < oP);
    bool timeOk    = IsNewsTime();
 
-   // Final signal logic
    bool sellSig = tappedSupply && bearRej && engulfSell && confSell && bosSell && rsiSell && trendSell;
    bool buySig  = tappedDemand && bullRej && engulfBuy  && confBuy  && bosBuy  && rsiBuy  && trendBuy;
 
-   // Debug logging (only on new bar) - shows why a potential signal was rejected
-   if(InpDebugLog)
+   // Optional debug log (only when enabled, only on tap, only once per bar)
+   if(InpDebugLog && (tappedSupply || tappedDemand))
    {
-      static datetime s_lastDbg = 0;
-      if(s_lastDbg != iTime(_Symbol, InpTF, 0))
-      {
-         s_lastDbg = iTime(_Symbol, InpTF, 0);
-         // log only when at least zone tap is true (otherwise too noisy)
-         if(tappedSupply || tappedDemand)
-         {
-            string side = tappedSupply ? "SELL-tap" : "BUY-tap";
-            PrintFormat("[DBG %s] tapS=%d tapD=%d bearRej=%d bullRej=%d engB=%d engS=%d cnfB=%d cnfS=%d bosB=%d bosS=%d rsi=%.1f rsiB=%d rsiS=%d trB=%d trS=%d",
-                        side,
-                        tappedSupply, tappedDemand,
-                        bearRej, bullRej,
-                        engulfBuy, engulfSell,
-                        confBuy, confSell,
-                        bosBuy, bosSell,
-                        rsi, rsiBuy, rsiSell,
-                        trendBuy, trendSell);
-         }
-      }
+      PrintFormat("[DBG] tapS=%d tapD=%d bearRej=%d bullRej=%d cnfB=%d cnfS=%d bosB=%d bosS=%d rsi=%.1f rsiB=%d rsiS=%d trB=%d trS=%d -> SELL=%d BUY=%d",
+                  tappedSupply, tappedDemand, bearRej, bullRej,
+                  confBuy, confSell, bosBuy, bosSell,
+                  rsi, rsiBuy, rsiSell, trendBuy, trendSell,
+                  sellSig, buySig);
    }
 
    bool isNewsSell = sellSig && spikeBull && timeOk;
@@ -829,62 +736,10 @@ double ComputeSL(bool isBuy, double pivotPrice)
                 : pivotPrice + atr * InpATRMultSL;
 }
 
-void ExecuteSell(double pivotHigh, bool isNews)
-{
-   sym.RefreshRates();
-   double entry  = sym.Bid();
-   double sl     = NormalizeDouble(ComputeSL(false, pivotHigh), _Digits);
-   double tp     = NormalizeDouble(g_demandTop, _Digits);
-   double point  = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double slPts  = (sl - entry) / point;
-   double tpPts  = (entry - tp) / point;
-
-   if(slPts <= 0 || tpPts <= 0) return;
-   if(!ValidStopDistance(false, entry, sl, tp)) return;
-
-   double rr   = tpPts / slPts;
-   if(rr < InpMinRR) return;
-
-   double lots = CalcLot(slPts);
-   string cmt  = InpComment + (isNews ? "_SELL_N" : "_SELL");
-
-   if(trade.Sell(lots, _Symbol, entry, sl, tp, cmt))
-   {
-      RegisterEntry("SELL", entry, sl, tp, rr, isNews);
-      AnnounceEntry("SELL", entry, sl, tp, rr, lots, isNews);
-   }
-}
-
-void ExecuteBuy(double pivotLow, bool isNews)
-{
-   sym.RefreshRates();
-   double entry  = sym.Ask();
-   double sl     = NormalizeDouble(ComputeSL(true, pivotLow), _Digits);
-   double tp     = NormalizeDouble(g_supplyTop, _Digits);
-   double point  = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double slPts  = (entry - sl) / point;
-   double tpPts  = (tp - entry) / point;
-
-   if(slPts <= 0 || tpPts <= 0) return;
-   if(!ValidStopDistance(true, entry, sl, tp)) return;
-
-   double rr   = tpPts / slPts;
-   if(rr < InpMinRR) return;
-
-   double lots = CalcLot(slPts);
-   string cmt  = InpComment + (isNews ? "_BUY_N" : "_BUY");
-
-   if(trade.Buy(lots, _Symbol, entry, sl, tp, cmt))
-   {
-      RegisterEntry("BUY", entry, sl, tp, rr, isNews);
-      AnnounceEntry("BUY", entry, sl, tp, rr, lots, isNews);
-   }
-}
-
 bool ValidStopDistance(bool isBuy, double entry, double sl, double tp)
 {
-   double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   long   stopLvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   long stopLvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
    double minDist = stopLvl * point;
    if(isBuy)
    {
@@ -899,13 +754,54 @@ bool ValidStopDistance(bool isBuy, double entry, double sl, double tp)
    return true;
 }
 
+void ExecuteSell(double pivotHigh, bool isNews)
+{
+   sym.RefreshRates();
+   double entry = sym.Bid();
+   double sl    = NormalizeDouble(ComputeSL(false, pivotHigh), _Digits);
+   double tp    = NormalizeDouble(g_demandTop, _Digits);
+   double pt    = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double slPts = (sl - entry) / pt;
+   double tpPts = (entry - tp) / pt;
+   if(slPts <= 0 || tpPts <= 0) return;
+   if(!ValidStopDistance(false, entry, sl, tp)) return;
+   double rr = tpPts / slPts;
+   if(rr < InpMinRR) return;
+   double lots = CalcLot(slPts);
+   string cmt = InpComment + (isNews ? "_SELL_N" : "_SELL");
+   if(trade.Sell(lots, _Symbol, entry, sl, tp, cmt))
+   {
+      RegisterEntry("SELL", entry, sl, tp, rr, isNews);
+      AnnounceEntry("SELL", entry, sl, tp, rr, lots, isNews);
+   }
+}
+
+void ExecuteBuy(double pivotLow, bool isNews)
+{
+   sym.RefreshRates();
+   double entry = sym.Ask();
+   double sl    = NormalizeDouble(ComputeSL(true, pivotLow), _Digits);
+   double tp    = NormalizeDouble(g_supplyTop, _Digits);
+   double pt    = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double slPts = (entry - sl) / pt;
+   double tpPts = (tp - entry) / pt;
+   if(slPts <= 0 || tpPts <= 0) return;
+   if(!ValidStopDistance(true, entry, sl, tp)) return;
+   double rr = tpPts / slPts;
+   if(rr < InpMinRR) return;
+   double lots = CalcLot(slPts);
+   string cmt = InpComment + (isNews ? "_BUY_N" : "_BUY");
+   if(trade.Buy(lots, _Symbol, entry, sl, tp, cmt))
+   {
+      RegisterEntry("BUY", entry, sl, tp, rr, isNews);
+      AnnounceEntry("BUY", entry, sl, tp, rr, lots, isNews);
+   }
+}
+
 void RegisterEntry(string sig, double entry, double sl, double tp, double rr, bool isNews)
 {
    g_lastSignal = sig;
-   g_lastEntry  = entry;
-   g_lastSL     = sl;
-   g_lastTP     = tp;
-   g_lastRR     = rr;
+   g_lastEntry  = entry; g_lastSL = sl; g_lastTP = tp; g_lastRR = rr;
    g_newsBoost  = isNews;
 }
 
@@ -915,43 +811,43 @@ void AnnounceEntry(string sig, double entry, double sl, double tp, double rr, do
                              sig, _Symbol, _Digits, entry, _Digits, sl, _Digits, tp,
                              rr, lots, isNews ? " [NEWS]" : "");
    Print(msg);
+   if(g_isTester) return;          // skip alerts in tester for speed
    if(InpAlertPopup) Alert(msg);
    if(InpAlertPush)  SendNotification(msg);
    if(InpAlertSound) PlaySound("alert.wav");
 }
 
 //+------------------------------------------------------------------+
-//| TRAILING STOP & BREAKEVEN                                        |
+//| TRAILING + BE                                                    |
 //+------------------------------------------------------------------+
 void ManageTrailing()
 {
    if(!InpUseTrailing) return;
-   double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   long   stopLvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   long   freeze  = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-   double minDist = MathMax(stopLvl, freeze) * point;
+   double pt = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   long stopLvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long freeze  = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   double minDist = MathMax(stopLvl, freeze) * pt;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(!pos.SelectByIndex(i)) continue;
       if(pos.Magic() != InpMagic || pos.Symbol() != _Symbol) continue;
-
-      ulong  ticket = pos.Ticket();
-      double open   = pos.PriceOpen();
-      double curSL  = pos.StopLoss();
-      double curTP  = pos.TakeProfit();
-      double bid    = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask    = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double newSL  = curSL;
+      ulong ticket = pos.Ticket();
+      double open  = pos.PriceOpen();
+      double curSL = pos.StopLoss();
+      double curTP = pos.TakeProfit();
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double newSL = curSL;
 
       if(pos.PositionType() == POSITION_TYPE_BUY)
       {
-         double profPts = (bid - open) / point;
-         if(profPts >= InpBreakevenAtPts && (curSL < open + InpBreakevenLockPts * point))
-            newSL = open + InpBreakevenLockPts * point;
+         double profPts = (bid - open) / pt;
+         if(profPts >= InpBreakevenAtPts && (curSL < open + InpBreakevenLockPts * pt))
+            newSL = open + InpBreakevenLockPts * pt;
          if(profPts >= InpTrailStartPts)
          {
-            double trail = bid - InpTrailStepPts * point;
+            double trail = bid - InpTrailStepPts * pt;
             if(trail > newSL) newSL = trail;
          }
          if(newSL > curSL && (bid - newSL) >= minDist)
@@ -959,12 +855,12 @@ void ManageTrailing()
       }
       else
       {
-         double profPts = (open - ask) / point;
-         if(profPts >= InpBreakevenAtPts && (curSL == 0 || curSL > open - InpBreakevenLockPts * point))
-            newSL = open - InpBreakevenLockPts * point;
+         double profPts = (open - ask) / pt;
+         if(profPts >= InpBreakevenAtPts && (curSL == 0 || curSL > open - InpBreakevenLockPts * pt))
+            newSL = open - InpBreakevenLockPts * pt;
          if(profPts >= InpTrailStartPts)
          {
-            double trail = ask + InpTrailStepPts * point;
+            double trail = ask + InpTrailStepPts * pt;
             if(curSL == 0 || trail < newSL || newSL == curSL) newSL = trail;
          }
          if((curSL == 0 || newSL < curSL) && (newSL - ask) >= minDist)
@@ -979,17 +875,18 @@ void SafeModify(ulong ticket, double newSL, double curTP)
    if(!trade.PositionModify(ticket, newSL, curTP))
    {
       uint err = trade.ResultRetcode();
-      if(err != TRADE_RETCODE_NO_CHANGES)
-         PrintFormat("Modify failed #%I64u rc=%u", ticket, err);
+      if(err != TRADE_RETCODE_NO_CHANGES && !g_isTester)
+         PrintFormat("Modify fail #%I64u rc=%u", ticket, err);
    }
 }
 
 //+------------------------------------------------------------------+
-//| PARTIAL PROFITS (per ticket tracking)                            |
+//| PARTIAL PROFIT                                                   |
 //+------------------------------------------------------------------+
 bool TicketArrayHas(ulong &arr[], ulong tk)
 {
-   for(int i = 0; i < ArraySize(arr); i++) if(arr[i] == tk) return true;
+   int n = ArraySize(arr);
+   for(int i = 0; i < n; i++) if(arr[i] == tk) return true;
    return false;
 }
 
@@ -1010,24 +907,29 @@ void PruneClosedTickets()
          TicketArrayAdd(open, pos.Ticket());
    }
    ulong tmp1[]; ArrayResize(tmp1, 0);
-   for(int i = 0; i < ArraySize(g_p1Tickets); i++)
+   int s1 = ArraySize(g_p1Tickets);
+   for(int i = 0; i < s1; i++)
       if(TicketArrayHas(open, g_p1Tickets[i])) TicketArrayAdd(tmp1, g_p1Tickets[i]);
-   ArrayFree(g_p1Tickets); ArrayResize(g_p1Tickets, ArraySize(tmp1));
-   for(int i = 0; i < ArraySize(tmp1); i++) g_p1Tickets[i] = tmp1[i];
+   ArrayFree(g_p1Tickets);
+   int t1 = ArraySize(tmp1);
+   ArrayResize(g_p1Tickets, t1);
+   for(int i = 0; i < t1; i++) g_p1Tickets[i] = tmp1[i];
 
    ulong tmp2[]; ArrayResize(tmp2, 0);
-   for(int i = 0; i < ArraySize(g_p2Tickets); i++)
+   int s2 = ArraySize(g_p2Tickets);
+   for(int i = 0; i < s2; i++)
       if(TicketArrayHas(open, g_p2Tickets[i])) TicketArrayAdd(tmp2, g_p2Tickets[i]);
-   ArrayFree(g_p2Tickets); ArrayResize(g_p2Tickets, ArraySize(tmp2));
-   for(int i = 0; i < ArraySize(tmp2); i++) g_p2Tickets[i] = tmp2[i];
+   ArrayFree(g_p2Tickets);
+   int t2 = ArraySize(tmp2);
+   ArrayResize(g_p2Tickets, t2);
+   for(int i = 0; i < t2; i++) g_p2Tickets[i] = tmp2[i];
 }
 
 void ManagePartial()
 {
    if(!InpUsePartial) return;
    PruneClosedTickets();
-
-   double point  = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double pt = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double volStep= SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
 
@@ -1035,44 +937,33 @@ void ManagePartial()
    {
       if(!pos.SelectByIndex(i)) continue;
       if(pos.Magic() != InpMagic || pos.Symbol() != _Symbol) continue;
+      ulong tk = pos.Ticket();
+      double open = pos.PriceOpen();
+      double vol  = pos.Volume();
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double profPts = (pos.PositionType() == POSITION_TYPE_BUY) ? (bid - open) / pt : (open - ask) / pt;
 
-      ulong  tk      = pos.Ticket();
-      double open    = pos.PriceOpen();
-      double vol     = pos.Volume();
-      double bid     = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask     = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double profPts = (pos.PositionType() == POSITION_TYPE_BUY)
-                        ? (bid - open) / point
-                        : (open - ask) / point;
-
-      // 1st partial
       if(!TicketArrayHas(g_p1Tickets, tk) && profPts >= InpP1Pts)
       {
          double cv = MathFloor((vol * InpP1Pct / 100.0) / volStep) * volStep;
          if(cv >= volMin && cv < vol)
             if(trade.PositionClosePartial(tk, cv))
-            {
                TicketArrayAdd(g_p1Tickets, tk);
-               PrintFormat("P1 booked #%I64u %.2f lots @ %.0f pts", tk, cv, profPts);
-            }
       }
-      // 2nd partial
       if(TicketArrayHas(g_p1Tickets, tk) && !TicketArrayHas(g_p2Tickets, tk) && profPts >= InpP2Pts)
       {
          double remain = pos.Volume();
          double cv = MathFloor((remain * InpP2Pct / 100.0) / volStep) * volStep;
          if(cv >= volMin && cv < remain)
             if(trade.PositionClosePartial(tk, cv))
-            {
                TicketArrayAdd(g_p2Tickets, tk);
-               PrintFormat("P2 booked #%I64u %.2f lots @ %.0f pts", tk, cv, profPts);
-            }
       }
    }
 }
 
 //+------------------------------------------------------------------+
-//| VISUAL ZONES                                                     |
+//| VISUAL ZONES (live only)                                         |
 //+------------------------------------------------------------------+
 void DrawZones()
 {
@@ -1085,36 +976,26 @@ void DrawZones()
    {
       if(ObjectFind(0, sName) < 0)
          ObjectCreate(0, sName, OBJ_RECTANGLE, 0, t1, g_supplyTop, t2, g_supplyBot);
-      else
-      {
-         ObjectMove(0, sName, 0, t1, g_supplyTop);
-         ObjectMove(0, sName, 1, t2, g_supplyBot);
-      }
+      else { ObjectMove(0, sName, 0, t1, g_supplyTop); ObjectMove(0, sName, 1, t2, g_supplyBot); }
       ObjectSetInteger(0, sName, OBJPROP_COLOR, InpClrSupply);
       ObjectSetInteger(0, sName, OBJPROP_FILL,  true);
       ObjectSetInteger(0, sName, OBJPROP_BACK,  true);
-      ObjectSetInteger(0, sName, OBJPROP_WIDTH, 1);
    }
    if(g_demandTop > 0 && g_demandBot > 0)
    {
       if(ObjectFind(0, dName) < 0)
          ObjectCreate(0, dName, OBJ_RECTANGLE, 0, t1, g_demandTop, t2, g_demandBot);
-      else
-      {
-         ObjectMove(0, dName, 0, t1, g_demandTop);
-         ObjectMove(0, dName, 1, t2, g_demandBot);
-      }
+      else { ObjectMove(0, dName, 0, t1, g_demandTop); ObjectMove(0, dName, 1, t2, g_demandBot); }
       ObjectSetInteger(0, dName, OBJPROP_COLOR, InpClrDemand);
       ObjectSetInteger(0, dName, OBJPROP_FILL,  true);
       ObjectSetInteger(0, dName, OBJPROP_BACK,  true);
-      ObjectSetInteger(0, dName, OBJPROP_WIDTH, 1);
    }
 }
 
 //+------------------------------------------------------------------+
-//| GRAPHICAL DASHBOARD                                              |
+//| DASHBOARD (live only, throttled)                                 |
 //+------------------------------------------------------------------+
-void MakeLabel(string name, int x, int y, string text, color clr, int size = 9, string font = "Consolas")
+void MakeLabel(string name, int x, int y, string text, color clr, int size = 9)
 {
    if(ObjectFind(0, name) < 0)
    {
@@ -1122,13 +1003,12 @@ void MakeLabel(string name, int x, int y, string text, color clr, int size = 9, 
       ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, false);
    }
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, size);
-   ObjectSetString (0, name, OBJPROP_FONT, font);
+   ObjectSetString (0, name, OBJPROP_FONT, "Consolas");
    ObjectSetString (0, name, OBJPROP_TEXT, text);
 }
 
@@ -1141,7 +1021,6 @@ void MakeBox(string name, int x, int y, int w, int h, color bg, color border)
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, false);
    }
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
@@ -1149,24 +1028,20 @@ void MakeBox(string name, int x, int y, int w, int h, color bg, color border)
    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, name, OBJPROP_COLOR, border);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
 }
 
 void BuildDashboard()
 {
-   int x = 14, y = 22, w = 290, h = 430;
+   int x = 14, y = 22, w = 290, h = 410;
    MakeBox(PFX + "panel",  x, y, w, h, InpClrBg, clrSlateGray);
    MakeBox(PFX + "header", x, y, w, 28, clrDarkSlateGray, clrSlateGray);
-   MakeLabel(PFX + "title", x + 10, y + 6, "ANMOL GOLDMIND AI Pro v4.20", InpClrText, 10, "Consolas Bold");
+   MakeLabel(PFX + "title", x + 10, y + 6, "ANMOL GOLDMIND AI Pro v4.30", InpClrText, 10);
    UpdateDashboard();
 }
-
-string YN(bool b) { return b ? "ON" : "OFF"; }
 
 void UpdateDashboard()
 {
    if(ObjectFind(0, PFX + "panel") < 0) BuildDashboard();
-
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
    double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
    double pnl = eq - bal;
@@ -1176,53 +1051,39 @@ void UpdateDashboard()
    double winRate = (g_totalTrades > 0) ? (100.0 * g_wins / g_totalTrades) : 0;
    double pf = (g_grossLoss > 0) ? (g_grossProfit / g_grossLoss) : (g_grossProfit > 0 ? 99.0 : 0);
    double spread = GetSpreadPts();
-
-   color sigClr = (g_lastSignal == "BUY")  ? InpClrBuy
-                : (g_lastSignal == "SELL") ? InpClrSell
-                                           : InpClrWarn;
+   color sigClr = (g_lastSignal == "BUY") ? InpClrBuy : (g_lastSignal == "SELL") ? InpClrSell : InpClrWarn;
 
    int x = 24, y = 60, lh = 18;
+   MakeLabel(PFX + "l_sym",   x, y,           StringFormat("Symbol: %s %s", _Symbol, EnumToString(InpTF)), InpClrText);
+   MakeLabel(PFX + "l_sig",   x, y + lh*1,    StringFormat("Signal: %s%s", g_newsBoost ? "[N] " : "", g_lastSignal), sigClr, 10);
+   MakeLabel(PFX + "l_entry", x, y + lh*2,    StringFormat("Entry:  %s", g_lastEntry > 0 ? DoubleToString(g_lastEntry,_Digits) : "-"), InpClrText);
+   MakeLabel(PFX + "l_sl",    x, y + lh*3,    StringFormat("SL:     %s", g_lastSL > 0 ? DoubleToString(g_lastSL,_Digits) : "-"), InpClrText);
+   MakeLabel(PFX + "l_tp",    x, y + lh*4,    StringFormat("TP:     %s", g_lastTP > 0 ? DoubleToString(g_lastTP,_Digits) : "-"), InpClrText);
+   MakeLabel(PFX + "l_rr",    x, y + lh*5,    StringFormat("R:R:    1:%.2f", g_lastRR), InpClrText);
 
-   MakeLabel(PFX + "l_sym",   x, y,           StringFormat("Symbol:    %s  %s", _Symbol, EnumToString(InpTF)), InpClrText);
-   MakeLabel(PFX + "l_sig",   x, y + lh*1,    StringFormat("Signal:    %s%s", g_newsBoost ? "[NEWS] " : "", g_lastSignal), sigClr, 10, "Consolas Bold");
-   MakeLabel(PFX + "l_entry", x, y + lh*2,    StringFormat("Entry:     %s",  g_lastEntry > 0 ? DoubleToString(g_lastEntry, _Digits) : "-"), InpClrText);
-   MakeLabel(PFX + "l_sl",    x, y + lh*3,    StringFormat("Stop Loss: %s",  g_lastSL    > 0 ? DoubleToString(g_lastSL,    _Digits) : "-"), InpClrText);
-   MakeLabel(PFX + "l_tp",    x, y + lh*4,    StringFormat("Take Prof: %s",  g_lastTP    > 0 ? DoubleToString(g_lastTP,    _Digits) : "-"), InpClrText);
-   MakeLabel(PFX + "l_rr",    x, y + lh*5,    StringFormat("R:R:       1:%.2f", g_lastRR), InpClrText);
+   MakeLabel(PFX + "l_sup",   x, y + lh*7,    StringFormat("Supply: %s/%s", DoubleToString(g_supplyTop,_Digits), DoubleToString(g_supplyBot,_Digits)), InpClrSell);
+   MakeLabel(PFX + "l_dem",   x, y + lh*8,    StringFormat("Demand: %s/%s", DoubleToString(g_demandTop,_Digits), DoubleToString(g_demandBot,_Digits)), InpClrBuy);
 
-   MakeLabel(PFX + "l_sep1",  x, y + lh*6 + 4, "-- Zones --", clrSilver);
-   MakeLabel(PFX + "l_sup",   x, y + lh*7 + 4, StringFormat("Supply:   %s / %s", DoubleToString(g_supplyTop,_Digits), DoubleToString(g_supplyBot,_Digits)), InpClrSell);
-   MakeLabel(PFX + "l_dem",   x, y + lh*8 + 4, StringFormat("Demand:   %s / %s", DoubleToString(g_demandTop,_Digits), DoubleToString(g_demandBot,_Digits)), InpClrBuy);
+   MakeLabel(PFX + "l_bal",   x, y + lh*10,   StringFormat("Balance: %.2f", bal), InpClrText);
+   MakeLabel(PFX + "l_eq",    x, y + lh*11,   StringFormat("Equity:  %.2f", eq), InpClrText);
+   MakeLabel(PFX + "l_pnl",   x, y + lh*12,   StringFormat("PnL:     %s%.2f", pnl >= 0 ? "+" : "", pnl), pnl >= 0 ? InpClrBuy : InpClrSell);
+   MakeLabel(PFX + "l_day",   x, y + lh*13,   StringFormat("Day:     %s%.2f (%.2f%%)", dayPnL >= 0 ? "+" : "", dayPnL, dayPct), dayPnL >= 0 ? InpClrBuy : InpClrSell);
+   MakeLabel(PFX + "l_dd",    x, y + lh*14,   StringFormat("DD:      %.2f%%", ddPct), ddPct > InpMaxEquityDDPct * 0.7 ? InpClrWarn : InpClrText);
 
-   MakeLabel(PFX + "l_sep2",  x, y + lh*9 + 8, "-- Account --", clrSilver);
-   MakeLabel(PFX + "l_bal",   x, y + lh*10 + 8, StringFormat("Balance:   %.2f", bal), InpClrText);
-   MakeLabel(PFX + "l_eq",    x, y + lh*11 + 8, StringFormat("Equity:    %.2f", eq), InpClrText);
-   MakeLabel(PFX + "l_pnl",   x, y + lh*12 + 8, StringFormat("Open PnL:  %s%.2f", pnl >= 0 ? "+" : "", pnl), pnl >= 0 ? InpClrBuy : InpClrSell);
-   MakeLabel(PFX + "l_day",   x, y + lh*13 + 8, StringFormat("Day PnL:   %s%.2f (%.2f%%)", dayPnL >= 0 ? "+" : "", dayPnL, dayPct), dayPnL >= 0 ? InpClrBuy : InpClrSell);
-   MakeLabel(PFX + "l_dd",    x, y + lh*14 + 8, StringFormat("Equity DD: %.2f%% (peak %.2f)", ddPct, g_equityPeak), ddPct > InpMaxEquityDDPct * 0.7 ? InpClrWarn : InpClrText);
+   MakeLabel(PFX + "l_stats", x, y + lh*16,   StringFormat("T:%d W:%d L:%d WR:%.1f%% PF:%.2f", g_totalTrades, g_wins, g_losses, winRate, pf), InpClrText);
+   MakeLabel(PFX + "l_today", x, y + lh*17,   StringFormat("Today losses:%d/%d %s", g_lossesToday, InpMaxLossesPerDay, InCooldown() ? "COOLDOWN" : ""), InCooldown() ? InpClrWarn : InpClrText);
 
-   MakeLabel(PFX + "l_sep3",  x, y + lh*15 + 12, "-- Stats --", clrSilver);
-   MakeLabel(PFX + "l_stats", x, y + lh*16 + 12, StringFormat("Trades:%d  W:%d  L:%d  WR:%.1f%%  PF:%.2f",
-                                                  g_totalTrades, g_wins, g_losses, winRate, pf), InpClrText);
-   MakeLabel(PFX + "l_today", x, y + lh*17 + 12, StringFormat("Today losses: %d/%d  Cooldown:%s",
-                                                  g_lossesToday, InpMaxLossesPerDay, InCooldown() ? "YES" : "no"),
-             InCooldown() ? InpClrWarn : InpClrText);
-
-   MakeLabel(PFX + "l_sep4",  x, y + lh*18 + 16, "-- Filters --", clrSilver);
-   MakeLabel(PFX + "l_news",  x, y + lh*19 + 16,
-             StringFormat("News:%s  Time:%s  Spread:%.0f",
+   MakeLabel(PFX + "l_news",  x, y + lh*19,   StringFormat("News:%s News-time:%s Spread:%.0f",
                           InpNewsMode == NEWS_OFF ? "OFF" : (InpNewsMode == NEWS_BLOCK ? "BLOCK" : "BOOST"),
                           IsNewsTime() ? "ACTIVE" : "no", spread),
              spread > InpMaxSpreadPts ? InpClrWarn : InpClrText);
 
-   string status;
-   color  statusClr;
-   if(g_ddLocked)        { status = "LOCKED: " + g_ddLockReason; statusClr = InpClrSell; }
-   else if(InCooldown()) { status = "COOLDOWN";                  statusClr = InpClrWarn; }
-   else if(spread > InpMaxSpreadPts) { status = "WIDE SPREAD";   statusClr = InpClrWarn; }
-   else                  { status = "ARMED";                     statusClr = InpClrBuy;  }
-   MakeLabel(PFX + "l_status", x, y + lh*20 + 20, "STATUS: " + status, statusClr, 10, "Consolas Bold");
-
+   string status; color statusClr;
+   if(g_ddLocked)             { status = "LOCKED: " + g_ddLockReason; statusClr = InpClrSell; }
+   else if(InCooldown())      { status = "COOLDOWN";                  statusClr = InpClrWarn; }
+   else if(spread > InpMaxSpreadPts) { status = "WIDE SPREAD";        statusClr = InpClrWarn; }
+   else                       { status = "ARMED";                     statusClr = InpClrBuy;  }
+   MakeLabel(PFX + "l_status", x, y + lh*21, "STATUS: " + status, statusClr, 10);
    ChartRedraw(0);
 }
 //+------------------------------------------------------------------+
