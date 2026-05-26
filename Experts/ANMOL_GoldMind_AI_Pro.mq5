@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Antu Trading"
 #property link      "https://github.com/amolrasal2004-ctrl/Antu_ai"
-#property version   "4.00"
+#property version   "4.10"
 #property strict
 #property description "ANMOL GOLDMIND AI Pro - Supply/Demand + News Reversal"
 #property description "Professional risk management, drawdown lock, visual dashboard."
@@ -36,6 +36,14 @@ enum ENUM_SL_MODE
    SL_ATR_DYNAMIC  = 1  // ATR-based dynamic SL
 };
 
+enum ENUM_CONFIRM_MODE
+{
+   CONFIRM_OFF       = 0, // OFF - immediate signal (old behavior)
+   CONFIRM_NEXT_BAR  = 1, // Wait 1 bar for confirmation close
+   CONFIRM_BOS       = 2, // Wait for break of structure (mini swing)
+   CONFIRM_STRICT    = 3  // BOTH next-bar AND BOS (safest, fewer trades)
+};
+
 //+------------------------------------------------------------------+
 //| INPUTS                                                           |
 //+------------------------------------------------------------------+
@@ -46,6 +54,21 @@ input ENUM_SL_MODE InpSLMode         = SL_FIXED_BUFFER;// Stop loss mode
 input double   InpSLBufferPts        = 150.0;         // SL buffer (points) - fixed mode
 input double   InpATRMultSL          = 1.5;           // ATR multiplier for SL - ATR mode
 input double   InpMinRR              = 1.5;           // Minimum R:R required
+
+input group "=== SIGNAL CONFIRMATION (anti-fake-signal) ==="
+input ENUM_CONFIRM_MODE InpConfirmMode = CONFIRM_NEXT_BAR; // Confirmation mode
+input bool     InpRequireWickRej     = true;          // Require wick-rejection into zone
+input double   InpMinWickRatio       = 50.0;          // Min wick % of candle range (rejection)
+input double   InpMinBodyRatio       = 40.0;          // Min body % of candle range (strong close)
+input bool     InpRequireEngulf      = false;         // Require engulfing pattern
+input bool     InpUseRSIFilter       = true;          // Use RSI momentum filter
+input int      InpRSIPeriod          = 14;            // RSI period
+input double   InpRSIBuyMax          = 40.0;          // RSI must be <= this for BUY (oversold)
+input double   InpRSISellMin         = 60.0;          // RSI must be >= this for SELL (overbought)
+input bool     InpUseTrendFilter     = true;          // Higher-TF trend filter (EMA)
+input ENUM_TIMEFRAMES InpTrendTF     = PERIOD_H1;     // Trend timeframe
+input int      InpTrendEMA           = 50;            // Trend EMA period (0=disable HTF, use only on signal TF)
+input double   InpZoneTolerancePts   = 30.0;          // Zone tap tolerance (points) - how close counts as touch
 
 input group "=== RISK MANAGEMENT ==="
 input bool     InpAutoLot            = true;          // Auto lot from risk %
@@ -121,6 +144,8 @@ double   g_supplyTop = 0, g_supplyBot = 0;
 double   g_demandTop = 0, g_demandBot = 0;
 
 int      g_atrHandle = INVALID_HANDLE;
+int      g_rsiHandle = INVALID_HANDLE;
+int      g_emaHandle = INVALID_HANDLE;
 
 string   g_lastSignal = "WAITING";
 double   g_lastEntry = 0, g_lastSL = 0, g_lastTP = 0, g_lastRR = 0;
@@ -175,6 +200,17 @@ int OnInit()
       return INIT_FAILED;
    }
 
+   if(InpUseRSIFilter)
+   {
+      g_rsiHandle = iRSI(_Symbol, InpTF, InpRSIPeriod, PRICE_CLOSE);
+      if(g_rsiHandle == INVALID_HANDLE) { Print("RSI handle failed"); return INIT_FAILED; }
+   }
+   if(InpUseTrendFilter && InpTrendEMA > 0)
+   {
+      g_emaHandle = iMA(_Symbol, InpTrendTF, InpTrendEMA, 0, MODE_EMA, PRICE_CLOSE);
+      if(g_emaHandle == INVALID_HANDLE) { Print("EMA handle failed"); return INIT_FAILED; }
+   }
+
    ResetDay(true);
    g_equityPeak = AccountInfoDouble(ACCOUNT_EQUITY);
 
@@ -191,6 +227,8 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
+   if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
+   if(g_emaHandle != INVALID_HANDLE) IndicatorRelease(g_emaHandle);
    ObjectsDeleteAll(0, PFX);
    Comment("");
 }
@@ -389,6 +427,118 @@ double GetATR(int shift)
    return a[0];
 }
 
+double GetRSI(int shift)
+{
+   if(g_rsiHandle == INVALID_HANDLE) return 50.0;
+   double r[]; ArraySetAsSeries(r, true);
+   if(CopyBuffer(g_rsiHandle, 0, shift, 1, r) < 1) return 50.0;
+   return r[0];
+}
+
+double GetEMA(int shift)
+{
+   if(g_emaHandle == INVALID_HANDLE) return 0;
+   double e[]; ArraySetAsSeries(e, true);
+   if(CopyBuffer(g_emaHandle, 0, shift, 1, e) < 1) return 0;
+   return e[0];
+}
+
+//+------------------------------------------------------------------+
+//| CANDLE ANALYSIS HELPERS                                          |
+//+------------------------------------------------------------------+
+double CandleRange(double h, double l) { return MathMax(h - l, _Point); }
+double CandleBody(double o, double c)  { return MathAbs(c - o); }
+double UpperWick(double h, double o, double c) { return h - MathMax(o, c); }
+double LowerWick(double l, double o, double c) { return MathMin(o, c) - l; }
+
+// Bullish rejection at demand: lower wick big, body bullish closing above zone-bottom area
+bool IsBullishRejection(double o, double c, double h, double l, double zoneTop, double zoneBot)
+{
+   double rng  = CandleRange(h, l);
+   double body = CandleBody(o, c);
+   double lwk  = LowerWick(l, o, c);
+
+   bool wickOk = (lwk / rng * 100.0) >= InpMinWickRatio;
+   bool bodyOk = (body / rng * 100.0) >= InpMinBodyRatio;
+   bool bullClose = c > o;
+   bool wickedZone = l <= zoneTop;             // wick dipped into zone
+   bool closedAbove = c > zoneBot;             // body closed back above zone bottom
+   if(InpRequireWickRej) return wickOk && bodyOk && bullClose && wickedZone && closedAbove;
+   return bodyOk && bullClose && wickedZone;
+}
+
+// Bearish rejection at supply
+bool IsBearishRejection(double o, double c, double h, double l, double zoneTop, double zoneBot)
+{
+   double rng  = CandleRange(h, l);
+   double body = CandleBody(o, c);
+   double uwk  = UpperWick(h, o, c);
+
+   bool wickOk = (uwk / rng * 100.0) >= InpMinWickRatio;
+   bool bodyOk = (body / rng * 100.0) >= InpMinBodyRatio;
+   bool bearClose = c < o;
+   bool wickedZone = h >= zoneBot;
+   bool closedBelow = c < zoneTop;
+   if(InpRequireWickRej) return wickOk && bodyOk && bearClose && wickedZone && closedBelow;
+   return bodyOk && bearClose && wickedZone;
+}
+
+bool IsBullEngulf(double o1, double c1, double o2, double c2)
+{
+   return (c2 < o2) && (c1 > o1) && (c1 >= o2) && (o1 <= c2);
+}
+
+bool IsBearEngulf(double o1, double c1, double o2, double c2)
+{
+   return (c2 > o2) && (c1 < o1) && (c1 <= o2) && (o1 >= c2);
+}
+
+//+------------------------------------------------------------------+
+//| BREAK OF STRUCTURE (BOS)                                         |
+//+------------------------------------------------------------------+
+// For BUY at demand: previous candle low must hold AND current closes above prev high
+bool BullishBOS(int signalShift)
+{
+   double h[], l[], c[];
+   ArraySetAsSeries(h, true); ArraySetAsSeries(l, true); ArraySetAsSeries(c, true);
+   if(CopyHigh (_Symbol, InpTF, signalShift - 1, 4, h) < 4) return false;
+   if(CopyLow  (_Symbol, InpTF, signalShift - 1, 4, l) < 4) return false;
+   if(CopyClose(_Symbol, InpTF, signalShift - 1, 1, c) < 1) return false;
+   // h[0]=signalShift-1 (newer), h[1]=signalShift, h[2..3]=older
+   double prevHigh = MathMax(h[1], MathMax(h[2], h[3]));
+   return c[0] > prevHigh;
+}
+
+bool BearishBOS(int signalShift)
+{
+   double h[], l[], c[];
+   ArraySetAsSeries(h, true); ArraySetAsSeries(l, true); ArraySetAsSeries(c, true);
+   if(CopyHigh (_Symbol, InpTF, signalShift - 1, 4, h) < 4) return false;
+   if(CopyLow  (_Symbol, InpTF, signalShift - 1, 4, l) < 4) return false;
+   if(CopyClose(_Symbol, InpTF, signalShift - 1, 1, c) < 1) return false;
+   double prevLow = MathMin(l[1], MathMin(l[2], l[3]));
+   return c[0] < prevLow;
+}
+
+//+------------------------------------------------------------------+
+//| TREND FILTER (HTF EMA)                                           |
+//+------------------------------------------------------------------+
+bool TrendAllowsBuy()
+{
+   if(!InpUseTrendFilter || InpTrendEMA <= 0) return true;
+   double ema = GetEMA(0);
+   if(ema <= 0) return true;
+   return SymbolInfoDouble(_Symbol, SYMBOL_BID) >= ema;
+}
+
+bool TrendAllowsSell()
+{
+   if(!InpUseTrendFilter || InpTrendEMA <= 0) return true;
+   double ema = GetEMA(0);
+   if(ema <= 0) return true;
+   return SymbolInfoDouble(_Symbol, SYMBOL_BID) <= ema;
+}
+
 double GetSpreadPts()
 {
    return (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -565,29 +715,79 @@ void TryEntries()
    ArraySetAsSeries(c, true); ArraySetAsSeries(o, true);
    ArraySetAsSeries(h, true); ArraySetAsSeries(l, true);
 
-   if(CopyClose(_Symbol, InpTF, 0, 5, c) < 5) return;
-   if(CopyOpen (_Symbol, InpTF, 0, 5, o) < 5) return;
-   if(CopyHigh (_Symbol, InpTF, 0, 5, h) < 5) return;
-   if(CopyLow  (_Symbol, InpTF, 0, 5, l) < 5) return;
+   if(CopyClose(_Symbol, InpTF, 0, 6, c) < 6) return;
+   if(CopyOpen (_Symbol, InpTF, 0, 6, o) < 6) return;
+   if(CopyHigh (_Symbol, InpTF, 0, 6, h) < 6) return;
+   if(CopyLow  (_Symbol, InpTF, 0, 6, l) < 6) return;
 
-   double c1 = c[1], o1 = o[1], h1 = h[1], l1 = l[1];
-   double c2 = c[2], o2 = o[2];
+   // Confirmation mode decides which candle is the "signal" and which is "confirmation"
+   // - CONFIRM_OFF       : signal=index 1 (last closed), no confirm needed
+   // - CONFIRM_NEXT_BAR  : signal=index 2, confirmation=index 1
+   // - CONFIRM_BOS       : signal=index 1, BOS via current close
+   // - CONFIRM_STRICT    : signal=index 2, confirmation=index 1 + BOS
+   bool needConfirmBar = (InpConfirmMode == CONFIRM_NEXT_BAR || InpConfirmMode == CONFIRM_STRICT);
+   bool needBOS        = (InpConfirmMode == CONFIRM_BOS      || InpConfirmMode == CONFIRM_STRICT);
+   int  sigIdx         = needConfirmBar ? 2 : 1;
+   int  confIdx        = 1;   // candle that confirms
 
-   bool spikeBull = (InpNewsMode == NEWS_BOOST) && IsNewsSpike(2) && (c2 > o2);
-   bool spikeBear = (InpNewsMode == NEWS_BOOST) && IsNewsSpike(2) && (c2 < o2);
+   double oS = o[sigIdx], cS = c[sigIdx], hS = h[sigIdx], lS = l[sigIdx];
+   double oP = o[sigIdx + 1], cP = c[sigIdx + 1]; // candle BEFORE signal
+   double oC = o[confIdx], cC = c[confIdx];
+
+   double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double tol     = InpZoneTolerancePts * point;
+
+   // Zone tap with tolerance (price came close enough, doesn't need to pierce exactly)
+   bool tappedSupply = (hS >= g_supplyBot - tol) && (cS <= g_supplyTop + tol);
+   bool tappedDemand = (lS <= g_demandTop + tol) && (cS >= g_demandBot - tol);
+
+   // Rejection candles
+   bool bearRej = IsBearishRejection(oS, cS, hS, lS, g_supplyTop, g_supplyBot);
+   bool bullRej = IsBullishRejection(oS, cS, hS, lS, g_demandTop, g_demandBot);
+
+   // Engulfing requirement
+   bool engulfBuy  = !InpRequireEngulf || IsBullEngulf(oS, cS, oP, cP);
+   bool engulfSell = !InpRequireEngulf || IsBearEngulf(oS, cS, oP, cP);
+
+   // Confirmation candle: must close in same direction as the signal
+   bool confBuy   = !needConfirmBar || (cC > oC && cC > cS);   // bullish conf closing above signal close
+   bool confSell  = !needConfirmBar || (cC < oC && cC < cS);   // bearish conf closing below signal close
+
+   // BOS (use signal's relevant index)
+   bool bosBuy    = !needBOS || BullishBOS(sigIdx);
+   bool bosSell   = !needBOS || BearishBOS(sigIdx);
+
+   // RSI
+   double rsi     = GetRSI(sigIdx);
+   bool rsiBuy    = !InpUseRSIFilter || rsi <= InpRSIBuyMax;
+   bool rsiSell   = !InpUseRSIFilter || rsi >= InpRSISellMin;
+
+   // Trend
+   bool trendBuy  = TrendAllowsBuy();
+   bool trendSell = TrendAllowsSell();
+
+   // News
+   bool spikeBull = (InpNewsMode == NEWS_BOOST) && IsNewsSpike(sigIdx + 1) && (cP > oP);
+   bool spikeBear = (InpNewsMode == NEWS_BOOST) && IsNewsSpike(sigIdx + 1) && (cP < oP);
    bool timeOk    = IsNewsTime();
 
-   bool normalSell = (h1 >= g_supplyBot) && (c1 < o1) && (c2 > o2) && (c1 <= g_supplyTop);
-   bool normalBuy  = (l1 <= g_demandTop) && (c1 > o1) && (c2 < o2) && (c1 >= g_demandBot);
+   // Final signal logic
+   bool sellSig = tappedSupply && bearRej && engulfSell && confSell && bosSell && rsiSell && trendSell;
+   bool buySig  = tappedDemand && bullRej && engulfBuy  && confBuy  && bosBuy  && rsiBuy  && trendBuy;
 
-   bool newsSell = spikeBull && (h1 >= g_supplyBot) && (c1 < o1) && (c1 <= g_supplyTop) && timeOk;
-   bool newsBuy  = spikeBear && (l1 <= g_demandTop) && (c1 > o1) && (c1 >= g_demandBot) && timeOk;
+   bool isNewsSell = sellSig && spikeBull && timeOk;
+   bool isNewsBuy  = buySig  && spikeBear && timeOk;
 
-   bool sellSig = (normalSell || newsSell);
-   bool buySig  = (normalBuy  || newsBuy);
-
-   if(sellSig) ExecuteSell(h1, h[2], newsSell);
-   else if(buySig) ExecuteBuy(l1, l[2], newsBuy);
+   if(sellSig)
+   {
+      double pivotHigh = MathMax(hS, h[sigIdx + 1]);
+      ExecuteSell(pivotHigh, isNewsSell);
+   }
+   else if(buySig)
+   {
+      double pivotLow = MathMin(lS, l[sigIdx + 1]);
+      ExecuteBuy(pivotLow, isNewsBuy);
+   }
 }
 
 double ComputeSL(bool isBuy, double pivotPrice)
@@ -604,12 +804,11 @@ double ComputeSL(bool isBuy, double pivotPrice)
                 : pivotPrice + atr * InpATRMultSL;
 }
 
-void ExecuteSell(double h1, double h2, bool isNews)
+void ExecuteSell(double pivotHigh, bool isNews)
 {
    sym.RefreshRates();
    double entry  = sym.Bid();
-   double pivot  = MathMax(h1, h2);
-   double sl     = NormalizeDouble(ComputeSL(false, pivot), _Digits);
+   double sl     = NormalizeDouble(ComputeSL(false, pivotHigh), _Digits);
    double tp     = NormalizeDouble(g_demandTop, _Digits);
    double point  = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    double slPts  = (sl - entry) / point;
@@ -631,12 +830,11 @@ void ExecuteSell(double h1, double h2, bool isNews)
    }
 }
 
-void ExecuteBuy(double l1, double l2, bool isNews)
+void ExecuteBuy(double pivotLow, bool isNews)
 {
    sym.RefreshRates();
    double entry  = sym.Ask();
-   double pivot  = MathMin(l1, l2);
-   double sl     = NormalizeDouble(ComputeSL(true, pivot), _Digits);
+   double sl     = NormalizeDouble(ComputeSL(true, pivotLow), _Digits);
    double tp     = NormalizeDouble(g_supplyTop, _Digits);
    double point  = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    double slPts  = (entry - sl) / point;
@@ -934,7 +1132,7 @@ void BuildDashboard()
    int x = 14, y = 22, w = 290, h = 430;
    MakeBox(PFX + "panel",  x, y, w, h, InpClrBg, clrSlateGray);
    MakeBox(PFX + "header", x, y, w, 28, clrDarkSlateGray, clrSlateGray);
-   MakeLabel(PFX + "title", x + 10, y + 6, "ANMOL GOLDMIND AI Pro v4.0", InpClrText, 10, "Consolas Bold");
+   MakeLabel(PFX + "title", x + 10, y + 6, "ANMOL GOLDMIND AI Pro v4.10", InpClrText, 10, "Consolas Bold");
    UpdateDashboard();
 }
 
