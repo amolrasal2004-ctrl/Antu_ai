@@ -8,14 +8,14 @@
 //|  Symbol:    XAUUSD (Gold)                                        |
 //|  Broker:    Vantage                                              |
 //|  Account:   $300 starter                                         |
-//|  Target:    $15-20 daily profit (consistent)                     |
+//|  Target:    $10-12 daily profit (CONSERVATIVE & sustainable)     |
 //|  Strategy:  Mean Reversion in Asian Session range                |
 //+------------------------------------------------------------------+
 #property copyright "ANTU PROFIT ENGINE v01"
 #property link      ""
 #property version   "1.00"
 #property strict
-#property description "Sideways/Range XAUUSD scalper - $300 account, $15-20 daily target"
+#property description "Sideways/Range XAUUSD scalper - $300 account, $10-12 daily target (conservative)"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -53,17 +53,17 @@ input bool    InpDebugLog          = true;         // Print signal block reasons
 
 input group "===== TRADE PARAMETERS ====="
 input double  InpStopLossPips      = 15.0;         // Stop Loss (pips)
-input double  InpTakeProfitPips    = 20.0;         // Take Profit (pips) - bigger for $20 daily
+input double  InpTakeProfitPips    = 25.0;         // Take Profit (pips) - 1:1.66 R:R
 input bool    InpUseAutoLot        = false;        // Auto Lot from Risk %
-input double  InpManualLot         = 0.05;         // Manual Lot - 0.05 = ~$10 per win @ 20pip TP
+input double  InpManualLot         = 0.03;         // Manual Lot - 0.03 = ~$7.50 per win @ 25pip TP
 
 input group "===== RISK MANAGEMENT ====="
-input double  InpRiskPercent       = 2.5;          // Risk % per trade (relaxed for $20 target)
-input double  InpDailyProfitTarget = 20.0;         // Daily Profit Target ($)
-input double  InpDailyLossLimit    = 15.0;         // Daily Loss Limit ($)
-input int     InpMaxTradesPerDay   = 5;            // Max Trades per Day
-input int     InpMaxConsecLosses   = 3;            // Max Consec Losses (pause)
-input double  InpMaxDrawdownPct    = 7.0;          // Max DD % (lock)
+input double  InpRiskPercent       = 1.5;          // Risk % per trade (conservative)
+input double  InpDailyProfitTarget = 12.0;         // Daily Profit Target ($) - sustainable
+input double  InpDailyLossLimit    = 9.0;          // Daily Loss Limit ($) - tight
+input int     InpMaxTradesPerDay   = 4;            // Max Trades per Day
+input int     InpMaxConsecLosses   = 2;            // Max Consec Losses (pause) - safer
+input double  InpMaxDrawdownPct    = 5.0;          // Max DD % (lock) - protect capital
 
 input group "===== DASHBOARD ====="
 input bool    InpShowDashboard     = true;         // Show Dashboard
