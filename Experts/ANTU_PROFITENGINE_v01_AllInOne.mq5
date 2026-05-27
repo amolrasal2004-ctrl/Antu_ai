@@ -30,22 +30,22 @@ input string  InpComment           = "ANTU_PE_v01";// Trade comment
 input group "===== RANGE DETECTION (Asian Session) ====="
 input int     InpAsianStart        = 0;            // Asian Start Hour (Server)
 input int     InpAsianEnd          = 7;            // Asian End Hour (Server)
-input double  InpMinRangePips      = 30.0;         // Min Range (pips)
-input double  InpMaxRangePips      = 80.0;         // Max Range (pips)
-input double  InpEntryBufferPips   = 3.0;          // Entry Buffer from boundary
+input double  InpMinRangePips      = 20.0;         // Min Range (pips) - smaller ranges OK
+input double  InpMaxRangePips      = 120.0;        // Max Range (pips) - allow wider
+input double  InpEntryBufferPips   = 8.0;          // Entry Buffer from boundary - WIDER zone
 
 input group "===== SIGNAL ENGINE ====="
 input ENUM_TIMEFRAMES InpSignalTF  = PERIOD_M5;    // Signal Timeframe
-input double  InpRSIOversold       = 35.0;         // RSI Oversold (BUY) - relaxed
-input double  InpRSIOverbought     = 65.0;         // RSI Overbought (SELL) - relaxed
+input double  InpRSIOversold       = 40.0;         // RSI Oversold (BUY) - more entries
+input double  InpRSIOverbought     = 60.0;         // RSI Overbought (SELL) - more entries
 input bool    InpRequireCandleConf = false;        // Require candle confirmation
 
 input group "===== SAFETY FILTERS ====="
-input double  InpMaxADX            = 30.0;         // Max ADX (gold tuned, relaxed)
-input double  InpMaxATR            = 8.0;          // Max ATR (gold real volatility)
-input int     InpMaxSpread         = 50;           // Max Spread (Vantage XAUUSD)
+input double  InpMaxADX            = 35.0;         // Max ADX (Gold real range, more relaxed)
+input double  InpMaxATR            = 10.0;         // Max ATR (Gold real volatility)
+input int     InpMaxSpread         = 60;           // Max Spread (Vantage XAUUSD)
 input int     InpSessionStart      = 0;            // Trade Session Start (hr)
-input int     InpSessionEnd        = 20;           // Trade Session End (hr) - extended
+input int     InpSessionEnd        = 22;           // Trade Session End (hr) - full session
 
 input group "===== RANGE DETECTION OVERRIDE ====="
 input bool    InpUseFallbackRange  = true;         // Use last 24h H/L if Asian invalid
@@ -347,17 +347,20 @@ private:
    double         m_rsiOversold;
    double         m_rsiOverbought;
    bool           m_requireCandleConf;
+   double         m_entryBufferPips;
 
 public:
    CSignalEngine(string symbol, ENUM_TIMEFRAMES tf,
                  double rsiOS = 30.0, double rsiOB = 70.0,
-                 bool requireCandle = false)
+                 bool requireCandle = false,
+                 double entryBuffer = 3.0)
    {
       m_symbol = symbol;
       m_tf = tf;
       m_rsiOversold = rsiOS;
       m_rsiOverbought = rsiOB;
       m_requireCandleConf = requireCandle;
+      m_entryBufferPips = entryBuffer;
    }
 
    bool GetCandle(int shift, double &op, double &cl, double &hi, double &lo)
@@ -414,8 +417,8 @@ public:
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
       double rsi = filters.GetRSI();
 
-      bool nearLow  = rangeDet.IsNearLow(ask);
-      bool nearHigh = rangeDet.IsNearHigh(bid);
+      bool nearLow  = rangeDet.IsNearLow(ask, m_entryBufferPips);
+      bool nearHigh = rangeDet.IsNearHigh(bid, m_entryBufferPips);
 
       // BUY check
       if(nearLow)
@@ -957,7 +960,8 @@ int OnInit()
 
    g_signal = new CSignalEngine(_Symbol, InpSignalTF,
                                 InpRSIOversold, InpRSIOverbought,
-                                InpRequireCandleConf);
+                                InpRequireCandleConf,
+                                InpEntryBufferPips);
 
    g_risk = new CRiskManager(InpDailyProfitTarget, InpDailyLossLimit,
                              InpRiskPercent, InpMaxTradesPerDay,
