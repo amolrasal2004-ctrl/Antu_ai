@@ -52,18 +52,18 @@ input bool    InpUseFallbackRange  = true;         // Use last 24h H/L if Asian 
 input bool    InpDebugLog          = true;         // Print signal block reasons
 
 input group "===== TRADE PARAMETERS ====="
-input double  InpStopLossPips      = 18.0;         // Stop Loss (pips)
-input double  InpTakeProfitPips    = 10.0;         // Take Profit (pips)
-input bool    InpUseAutoLot        = true;         // Auto Lot from Risk %
-input double  InpManualLot         = 0.01;         // Manual Lot (if Auto OFF)
+input double  InpStopLossPips      = 15.0;         // Stop Loss (pips)
+input double  InpTakeProfitPips    = 20.0;         // Take Profit (pips) - bigger for $20 daily
+input bool    InpUseAutoLot        = false;        // Auto Lot from Risk %
+input double  InpManualLot         = 0.05;         // Manual Lot - 0.05 = ~$10 per win @ 20pip TP
 
 input group "===== RISK MANAGEMENT ====="
-input double  InpRiskPercent       = 1.0;          // Risk % per trade
+input double  InpRiskPercent       = 2.5;          // Risk % per trade (relaxed for $20 target)
 input double  InpDailyProfitTarget = 20.0;         // Daily Profit Target ($)
-input double  InpDailyLossLimit    = 10.0;         // Daily Loss Limit ($)
-input int     InpMaxTradesPerDay   = 4;            // Max Trades per Day
+input double  InpDailyLossLimit    = 15.0;         // Daily Loss Limit ($)
+input int     InpMaxTradesPerDay   = 5;            // Max Trades per Day
 input int     InpMaxConsecLosses   = 3;            // Max Consec Losses (pause)
-input double  InpMaxDrawdownPct    = 5.0;          // Max DD % (lock)
+input double  InpMaxDrawdownPct    = 7.0;          // Max DD % (lock)
 
 input group "===== DASHBOARD ====="
 input bool    InpShowDashboard     = true;         // Show Dashboard
