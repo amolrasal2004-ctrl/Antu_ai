@@ -36,15 +36,20 @@ input double  InpEntryBufferPips   = 3.0;          // Entry Buffer from boundary
 
 input group "===== SIGNAL ENGINE ====="
 input ENUM_TIMEFRAMES InpSignalTF  = PERIOD_M5;    // Signal Timeframe
-input double  InpRSIOversold       = 30.0;         // RSI Oversold (BUY)
-input double  InpRSIOverbought     = 70.0;         // RSI Overbought (SELL)
+input double  InpRSIOversold       = 35.0;         // RSI Oversold (BUY) - relaxed
+input double  InpRSIOverbought     = 65.0;         // RSI Overbought (SELL) - relaxed
+input bool    InpRequireCandleConf = false;        // Require candle confirmation
 
 input group "===== SAFETY FILTERS ====="
-input double  InpMaxADX            = 22.0;         // Max ADX (above = trend)
-input double  InpMaxATR            = 3.5;          // Max ATR (gold-tuned)
-input int     InpMaxSpread         = 30;           // Max Spread (points)
+input double  InpMaxADX            = 30.0;         // Max ADX (gold tuned, relaxed)
+input double  InpMaxATR            = 8.0;          // Max ATR (gold real volatility)
+input int     InpMaxSpread         = 50;           // Max Spread (Vantage XAUUSD)
 input int     InpSessionStart      = 0;            // Trade Session Start (hr)
-input int     InpSessionEnd        = 14;           // Trade Session End (hr)
+input int     InpSessionEnd        = 20;           // Trade Session End (hr) - extended
+
+input group "===== RANGE DETECTION OVERRIDE ====="
+input bool    InpUseFallbackRange  = true;         // Use last 24h H/L if Asian invalid
+input bool    InpDebugLog          = true;         // Print signal block reasons
 
 input group "===== TRADE PARAMETERS ====="
 input double  InpStopLossPips      = 18.0;         // Stop Loss (pips)
@@ -175,6 +180,37 @@ public:
 
       currentRange.isValid = (sizePips >= m_minRangePips &&
                               sizePips <= m_maxRangePips);
+      return currentRange.isValid;
+   }
+
+   //--- Fallback: use last N hours high/low if Asian invalid
+   bool CalculateFallbackRange(int hoursBack = 12)
+   {
+      datetime end = TimeCurrent();
+      datetime start = end - (hoursBack * 3600);
+
+      double highArr[], lowArr[];
+      ArraySetAsSeries(highArr, true);
+      ArraySetAsSeries(lowArr, true);
+
+      int copiedH = CopyHigh(m_symbol, PERIOD_M5, start, end, highArr);
+      int copiedL = CopyLow(m_symbol, PERIOD_M5, start, end, lowArr);
+
+      if(copiedH <= 0 || copiedL <= 0) return false;
+
+      double rHigh = highArr[ArrayMaximum(highArr)];
+      double rLow  = lowArr[ArrayMinimum(lowArr)];
+      double sizePips = (rHigh - rLow) / m_pipValue;
+
+      currentRange.high      = rHigh;
+      currentRange.low       = rLow;
+      currentRange.middle    = (rHigh + rLow) / 2.0;
+      currentRange.sizePips  = sizePips;
+      currentRange.startTime = start;
+      currentRange.endTime   = end;
+
+      // Fallback validation: only check upper limit (use it even if size big)
+      currentRange.isValid = (sizePips >= 15.0); // minimum 15 pips for meaningful range
       return currentRange.isValid;
    }
 
@@ -310,15 +346,18 @@ private:
    ENUM_TIMEFRAMES m_tf;
    double         m_rsiOversold;
    double         m_rsiOverbought;
+   bool           m_requireCandleConf;
 
 public:
    CSignalEngine(string symbol, ENUM_TIMEFRAMES tf,
-                 double rsiOS = 30.0, double rsiOB = 70.0)
+                 double rsiOS = 30.0, double rsiOB = 70.0,
+                 bool requireCandle = false)
    {
       m_symbol = symbol;
       m_tf = tf;
       m_rsiOversold = rsiOS;
       m_rsiOverbought = rsiOB;
+      m_requireCandleConf = requireCandle;
    }
 
    bool GetCandle(int shift, double &op, double &cl, double &hi, double &lo)
@@ -353,21 +392,66 @@ public:
       return (cl < op && body / range > 0.3);
    }
 
-   ENUM_SIGNAL CheckSignal(CRangeDetector *rangeDet, CFilters *filters)
+   ENUM_SIGNAL CheckSignal(CRangeDetector *rangeDet, CFilters *filters, string &reason)
    {
-      if(!filters.AllFiltersOk()) return SIGNAL_NONE;
-      if(!rangeDet.currentRange.isValid) return SIGNAL_NONE;
+      reason = "";
+      if(!filters.AllFiltersOk())
+      {
+         reason = "Filters blocked: ";
+         if(!filters.ADXOk())     reason += "ADX-high ";
+         if(!filters.ATROk())     reason += "ATR-high ";
+         if(!filters.SpreadOk())  reason += "Spread-high ";
+         if(!filters.SessionOk()) reason += "Session-closed ";
+         return SIGNAL_NONE;
+      }
+      if(!rangeDet.currentRange.isValid)
+      {
+         reason = "Range invalid";
+         return SIGNAL_NONE;
+      }
 
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
       double rsi = filters.GetRSI();
 
-      if(rangeDet.IsNearLow(ask) && rsi < m_rsiOversold && IsBullishCandle())
+      bool nearLow  = rangeDet.IsNearLow(ask);
+      bool nearHigh = rangeDet.IsNearHigh(bid);
+
+      // BUY check
+      if(nearLow)
+      {
+         if(rsi >= m_rsiOversold)
+         {
+            reason = "BUY zone hit but RSI=" + DoubleToString(rsi,1) +
+                     " (need <" + DoubleToString(m_rsiOversold,1) + ")";
+            return SIGNAL_NONE;
+         }
+         if(m_requireCandleConf && !IsBullishCandle())
+         {
+            reason = "BUY zone+RSI ok but no bullish candle";
+            return SIGNAL_NONE;
+         }
          return SIGNAL_BUY;
+      }
 
-      if(rangeDet.IsNearHigh(bid) && rsi > m_rsiOverbought && IsBearishCandle())
+      // SELL check
+      if(nearHigh)
+      {
+         if(rsi <= m_rsiOverbought)
+         {
+            reason = "SELL zone hit but RSI=" + DoubleToString(rsi,1) +
+                     " (need >" + DoubleToString(m_rsiOverbought,1) + ")";
+            return SIGNAL_NONE;
+         }
+         if(m_requireCandleConf && !IsBearishCandle())
+         {
+            reason = "SELL zone+RSI ok but no bearish candle";
+            return SIGNAL_NONE;
+         }
          return SIGNAL_SELL;
+      }
 
+      reason = "Price not at range boundary (mid-range)";
       return SIGNAL_NONE;
    }
 };
@@ -872,7 +956,8 @@ int OnInit()
                             InpMaxSpread, InpSessionStart, InpSessionEnd);
 
    g_signal = new CSignalEngine(_Symbol, InpSignalTF,
-                                InpRSIOversold, InpRSIOverbought);
+                                InpRSIOversold, InpRSIOverbought,
+                                InpRequireCandleConf);
 
    g_risk = new CRiskManager(InpDailyProfitTarget, InpDailyLossLimit,
                              InpRiskPercent, InpMaxTradesPerDay,
@@ -886,7 +971,8 @@ int OnInit()
       g_dash.Init();
    }
 
-   g_range.CalculateRange();
+   if(!g_range.CalculateRange() && InpUseFallbackRange)
+      g_range.CalculateFallbackRange(12);
 
    Print(">>> ANTU READY - Strategy active");
    return INIT_SUCCEEDED;
@@ -931,13 +1017,34 @@ void OnTick()
    if(curBarTime == g_lastBarTime) return;
    g_lastBarTime = curBarTime;
 
-   g_range.CalculateRange();
+   // Calculate range, with fallback if Asian invalid
+   if(!g_range.CalculateRange() && InpUseFallbackRange)
+   {
+      g_range.CalculateFallbackRange(12);  // last 12h H/L
+   }
 
-   if(!g_risk.CanTrade()) return;
+   if(!g_risk.CanTrade())
+   {
+      if(InpDebugLog)
+         Print(">>> ANTU SKIP: Risk blocked - ", g_risk.LockReasonText());
+      return;
+   }
    if(g_trade.CountOpenPositions() > 0) return;
 
-   ENUM_SIGNAL sig = g_signal.CheckSignal(g_range, g_filters);
-   if(sig == SIGNAL_NONE) return;
+   string sigReason = "";
+   ENUM_SIGNAL sig = g_signal.CheckSignal(g_range, g_filters, sigReason);
+   if(sig == SIGNAL_NONE)
+   {
+      if(InpDebugLog && sigReason != "")
+      {
+         Print(">>> ANTU NO SIGNAL: ", sigReason,
+               " | ADX=", DoubleToString(g_filters.GetADX(),1),
+               " ATR=", DoubleToString(g_filters.GetATR(),2),
+               " RSI=", DoubleToString(g_filters.GetRSI(),1),
+               " RangeValid=", g_range.currentRange.isValid);
+      }
+      return;
+   }
 
    double lot = InpManualLot;
    if(InpUseAutoLot)
