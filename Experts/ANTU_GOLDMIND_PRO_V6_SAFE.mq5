@@ -38,10 +38,13 @@ input double   InpTrailStepPips      = 8.0;      // Trail distance pips
 
 //================ DAILY GUARD =====================//
 input group "=== Daily Guard ==="
-input double   InpDailyTargetUSD     = 30.0;     // Daily Target $
-input double   InpDailyMaxLossUSD    = 8.0;      // Daily Max Loss $ (TIGHTER!)
-input int      InpMaxConsecutiveLoss = 2;        // Stop after N back-to-back losses
-input int      InpMaxTradesPerDay    = 6;        // Max trades per day
+input bool     InpUsePercentGuard    = true;     // Use % of balance (auto-scale) instead of fixed $
+input double   InpDailyTargetPct     = 5.0;      // Daily Target % of balance (e.g. 5% of $200 = $10)
+input double   InpDailyMaxLossPct    = 3.0;      // Daily Max Loss % of balance (e.g. 3% of $200 = $6)
+input double   InpDailyTargetUSD     = 30.0;     // Daily Target $ (used if % guard OFF, 0 = unlimited)
+input double   InpDailyMaxLossUSD    = 8.0;      // Daily Max Loss $ (used if % guard OFF, 0 = unlimited)
+input int      InpMaxConsecutiveLoss = 2;        // Stop after N back-to-back losses (0 = off)
+input int      InpMaxTradesPerDay    = 6;        // Max trades per day (0 = unlimited)
 
 //================ QUALITY FILTERS =================//
 input group "=== Quality Filters ==="
@@ -395,16 +398,27 @@ void OnTick(){
    string status = "ACTIVE";
    bool blocked = false;
 
-   if(cached_daily_profit >= InpDailyTargetUSD){ status="TARGET HIT"; blocked=true; }
-   else if(cached_daily_profit <= -InpDailyMaxLossUSD){ status="LOSS HIT"; blocked=true; }
-   else if(cached_consec_losses >= InpMaxConsecutiveLoss){ status="MAX LOSSES"; blocked=true; }
-   else if(cached_daily_trades >= InpMaxTradesPerDay){ status="MAX TRADES"; blocked=true; }
+   // Calculate effective target/loss limits
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double targetUSD, maxLossUSD;
+   if(InpUsePercentGuard){
+      targetUSD  = balance * InpDailyTargetPct  / 100.0;
+      maxLossUSD = balance * InpDailyMaxLossPct / 100.0;
+   } else {
+      targetUSD  = InpDailyTargetUSD;
+      maxLossUSD = InpDailyMaxLossUSD;
+   }
+
+   if(targetUSD > 0 && cached_daily_profit >= targetUSD){ status="TARGET HIT"; blocked=true; }
+   else if(maxLossUSD > 0 && cached_daily_profit <= -maxLossUSD){ status="LOSS HIT"; blocked=true; }
+   else if(InpMaxConsecutiveLoss > 0 && cached_consec_losses >= InpMaxConsecutiveLoss){ status="MAX LOSSES"; blocked=true; }
+   else if(InpMaxTradesPerDay > 0 && cached_daily_trades >= InpMaxTradesPerDay){ status="MAX TRADES"; blocked=true; }
    else if(!IsTradingTime()){ status="SLEEPING"; blocked=true; }
    else if(IsNewsBlock()){ status="NEWS BLOCK"; blocked=true; }
    else if(spread > InpMaxSpread){ status="HIGH SPREAD"; blocked=true; }
    else if(bandPips < InpMinBandDistancePips){ status="LOW VOL"; blocked=true; }
    else if(atrPips < InpMinATRPips){ status="LOW VOL"; blocked=true; }
-   else if(atrPips > InpMaxATRPips){ status="HIGH VOL"; blocked=true; } // news spike protection
+   else if(atrPips > InpMaxATRPips){ status="HIGH VOL"; blocked=true; }
 
    UpdateDashboard(cached_daily_profit, spread, bandPips, atrPips, status);
 
