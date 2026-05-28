@@ -48,10 +48,11 @@ input int      InpMaxTradesPerDay    = 6;        // Max trades per day (0 = unli
 
 //================ QUALITY FILTERS =================//
 input group "=== Quality Filters ==="
-input double   InpMinBandDistancePips = 40.0;    // Min BB width pips
-input int      InpMaxSpread          = 250;      // Max spread points (TIGHTER)
-input double   InpMinATRPips         = 8.0;      // Min ATR pips (avoid dead market)
-input double   InpMaxATRPips         = 80.0;     // Max ATR pips (avoid news spike)
+input double   InpMinBandDistancePips = 80.0;    // Min BB width pips (raised for high gold price)
+input int      InpMaxSpread          = 350;      // Max spread points
+input double   InpMinATRPips         = 15.0;    // Min ATR pips (avoid dead market)
+input double   InpMaxATRPips         = 350.0;    // Max ATR pips (only block real news spikes)
+input bool     InpUseATRMaxFilter    = true;     // Enable HIGH VOL block (turn off if too restrictive)
 
 //================ TIME / NEWS GUARD ===============//
 input group "=== Time & News Guard ==="
@@ -418,7 +419,7 @@ void OnTick(){
    else if(spread > InpMaxSpread){ status="HIGH SPREAD"; blocked=true; }
    else if(bandPips < InpMinBandDistancePips){ status="LOW VOL"; blocked=true; }
    else if(atrPips < InpMinATRPips){ status="LOW VOL"; blocked=true; }
-   else if(atrPips > InpMaxATRPips){ status="HIGH VOL"; blocked=true; }
+   else if(InpUseATRMaxFilter && atrPips > InpMaxATRPips){ status="HIGH VOL"; blocked=true; }
 
    UpdateDashboard(cached_daily_profit, spread, bandPips, atrPips, status);
 
