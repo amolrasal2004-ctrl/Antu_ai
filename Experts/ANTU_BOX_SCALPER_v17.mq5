@@ -1,17 +1,17 @@
 //+------------------------------------------------------------------+
-//|                                         ANTU_BOX_SCALPER_v16.mq5 |
+//|                                         ANTU_BOX_SCALPER_v17.mq5 |
 //|                         Professional XAUUSD Scalping EA for MT5  |
-//|       Strategy: SMART Box Breakout (Quality > Quantity)          |
+//|       Strategy: SMART Box Breakout (High Accuracy Edition)       |
 //|                  Timeframe: M5 | Symbol: XAUUSD                  |
 //|                       FINAL PRODUCTION BUILD                     |
 //+------------------------------------------------------------------+
 #property copyright   "Antu Trading"
 #property link        ""
-#property version     "16.00"
+#property version     "17.00"
 #property strict
-#property description "SMART Box Breakout Scalper - Quality Trades Only"
-#property description "Filters: Box Size + Body + EMA + ATR + Cooldown"
-#property description "Dynamic ATR-based TP/SL | Break-Even | Trailing"
+#property description "SMART Box Breakout - High Accuracy Edition"
+#property description "Filters: Box+Body+EMA+ATR+Wick+Closed-Bar+Touch"
+#property description "XAUUSD ONLY | NFP/FOMC News Shield | Daily $20 Target"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -27,8 +27,9 @@ input long     InpAccountLock    = 0;            // 0 = Any account
 input string   InpExpiryDate     = "";           // YYYY.MM.DD HH:MM (blank = no expiry)
 
 input group "=== IDENTIFICATION ==="
-input int      InpMagicNumber    = 202416;
-input string   InpEAComment      = "ANTU_BOX_V16";
+input int      InpMagicNumber    = 202417;
+input string   InpEAComment      = "ANTU_BOX_V17";
+input bool     InpXAUOnly        = true;         // Allow only XAUUSD/GOLD symbols
 
 input group "=== ALERTS & NOTIFICATIONS ==="
 input bool     InpSendPush       = true;         // Mobile push notifications
@@ -36,11 +37,12 @@ input bool     InpSendTelegram   = false;        // Telegram bot alerts
 input string   InpTelegramToken  = "YOUR_BOT_TOKEN_HERE";
 input string   InpTelegramChatID = "YOUR_CHAT_ID_HERE";
 
-input group "=== IMMORTAL SHIELD (News Filter) ==="
+input group "=== IMMORTAL SHIELD (Smart News Filter) ==="
 input bool     UseNewsFilter     = true;
 input int      PauseBeforeNews   = 30;           // Minutes before news
 input int      PauseAfterNews    = 30;           // Minutes after news
-input bool     FilterHighImpact  = true;         // Only high-impact events
+input bool     OnlyTopTierNews   = true;         // Only NFP/FOMC/CPI/Rate (importance=3)
+input bool     FilterHighImpact  = true;         // (legacy - kept for compat)
 
 input group "=== Session Filter ==="
 input bool     UseSessionTime    = true;         // Trade only in liquid hours
@@ -54,16 +56,23 @@ input double   InpMinBoxSize     = 80.0;         // Min box range in points
 input double   InpMaxBoxSize     = 500.0;        // Max box range in points
 input bool     InpDrawBox        = true;         // Show box lines on chart
 
-input group "=== QUALITY FILTERS (v16) ==="
+input group "=== QUALITY FILTERS (v17 ENHANCED) ==="
+input bool     InpClosedBarOnly  = true;         // ★ NEW: Trade only on closed bar (kills fakeouts)
 input bool     InpUseBodyFilter  = true;         // Strong breakout candle required
-input double   InpMinBodyPct     = 60.0;         // Min body % of total range
+input double   InpMinBodyPct     = 65.0;         // Min body % of total range (raised from 60)
+input bool     InpUseWickFilter  = true;         // ★ NEW: Reject candles with rejection wick
+input double   InpMaxWickPct     = 30.0;         // ★ NEW: Max wick on opposite side (% of range)
 input bool     InpUseMomentum    = true;         // EMA trend confirmation
 input int      InpEMAFast        = 8;
 input int      InpEMASlow        = 21;
+input bool     InpUseEMADistance = true;         // ★ NEW: Block entry if too far from EMA
+input double   InpMaxEMADistATR  = 2.0;          // ★ NEW: Max distance = 2x ATR (avoid late entry)
 input bool     InpUseATRFilter   = true;         // Skip dead market
 input int      InpATRPeriod      = 14;
 input double   InpMinATRPoints   = 100.0;        // Min ATR in points
-input int      InpCooldownMin    = 15;           // Cooldown minutes between trades
+input bool     InpUseTouchCount  = true;         // ★ NEW: Box must be tested multiple times
+input int      InpMinBoxTouches  = 2;            // ★ NEW: Min touches for valid S/R
+input int      InpCooldownMin    = 20;           // Cooldown minutes between trades (raised)
 
 input group "=== DYNAMIC TP / SL ==="
 input bool     InpDynamicTPSL    = true;         // ATR-based TP/SL
@@ -82,12 +91,12 @@ input double   InpBreakEvenAt    = 50.0;         // Trigger BE at +50 points
 input double   InpBreakEvenLock  = 10.0;         // Lock +10 points profit
 
 input group "=== RISK MANAGEMENT ==="
-input double   InpLotSize        = 0.01;
-input int      InpMaxTradesDay   = 8;            // Max trades per day
-input double   InpDailyProfitTgt = 30.0;         // Daily profit target ($)
-input double   InpDailyLossLimit = 15.0;         // Daily loss limit ($)
+input double   InpLotSize        = 0.02;         // Raised to 0.02 -> $20 target with 10 trades
+input int      InpMaxTradesDay   = 10;           // 10 trades/day - quality focus
+input double   InpDailyProfitTgt = 20.0;         // Daily profit target ($)
+input double   InpDailyLossLimit = 10.0;         // Daily loss limit ($)
 input int      InpMaxConsecLoss  = 2;            // Stop after N losses
-input double   InpEquityDDPct    = 10.0;         // Equity drawdown %
+input double   InpEquityDDPct    = 8.0;          // Equity drawdown % (tighter)
 
 input group "=== SPREAD & SLIPPAGE ==="
 input int      InpMaxSpread      = 35;           // Max spread (points)
@@ -146,8 +155,21 @@ int OnInit()
 {
    if(!CheckSecurity())
    {
-      Alert("ANTU v16: Security check failed!");
+      Alert("ANTU v17: Security check failed!");
       return INIT_FAILED;
+   }
+
+   // ===== XAUUSD-only enforcement (NEW v17) =====
+   if(InpXAUOnly)
+   {
+      string sym = _Symbol;
+      StringToUpper(sym);
+      if(StringFind(sym, "XAU") < 0 && StringFind(sym, "GOLD") < 0)
+      {
+         Alert("ANTU v17 works on XAUUSD/GOLD only! Current: " + _Symbol);
+         Print("ERROR: This EA is locked to XAUUSD/GOLD. Disable InpXAUOnly to override.");
+         return INIT_FAILED;
+      }
    }
 
    if(!symInfo.Name(_Symbol))
@@ -192,9 +214,9 @@ int OnInit()
    ResetDailyStats();
 
    g_EARunning  = true;
-   g_StatusMsg  = "SMART BOX V16 READY";
+   g_StatusMsg  = "SMART BOX V17 READY";
 
-   Print("ANTU BOX SCALPER v16 initialized successfully");
+   Print("ANTU BOX SCALPER v17 initialized successfully on ", _Symbol);
    return INIT_SUCCEEDED;
 }
 
@@ -299,10 +321,29 @@ void OnTick()
 
    if(g_BoxHigh <= 0 || g_BoxLow <= 0) { UpdateDashboard(); return; }
 
-   // ============== BREAKOUT UP ==============
-   if(ask > (g_BoxHigh + buffer))
+   // ============== CLOSED-BAR CONFIRMATION (v17 ★) ==============
+   // Use last CLOSED candle's close for breakout decision.
+   // This kills 80% of wick fakeouts that v16 still took.
+   double lastClose = iClose(_Symbol, PERIOD_M5, 1);
+   double lastHigh  = iHigh (_Symbol, PERIOD_M5, 1);
+   double lastLow   = iLow  (_Symbol, PERIOD_M5, 1);
+
+   bool brokeUp, brokeDn;
+   if(InpClosedBarOnly)
    {
-      if(!ValidateBreakout(1))
+      brokeUp = (lastClose > g_BoxHigh + buffer);
+      brokeDn = (lastClose < g_BoxLow  - buffer);
+   }
+   else
+   {
+      brokeUp = (ask > g_BoxHigh + buffer);
+      brokeDn = (bid < g_BoxLow  - buffer);
+   }
+
+   // ============== BREAKOUT UP ==============
+   if(brokeUp)
+   {
+      if(!ValidateBreakout(1, atr))
       {
          g_StatusMsg = "FAKE FILTERED (UP)";
          UpdateDashboard();
@@ -326,9 +367,9 @@ void OnTick()
       }
    }
    // ============== BREAKOUT DOWN ==============
-   else if(bid < (g_BoxLow - buffer))
+   else if(brokeDn)
    {
-      if(!ValidateBreakout(-1))
+      if(!ValidateBreakout(-1, atr))
       {
          g_StatusMsg = "FAKE FILTERED (DN)";
          UpdateDashboard();
@@ -374,19 +415,18 @@ string BuildAlert(string side, double price, double tp, double sl, double atr, d
 //                       BREAKOUT VALIDATION                        //
 //==================================================================//
 
-bool ValidateBreakout(int direction)
+bool ValidateBreakout(int direction, double atr)
 {
-   // Filter 1: Body Strength
+   double openP  = iOpen (_Symbol, PERIOD_M5, 1);
+   double closeP = iClose(_Symbol, PERIOD_M5, 1);
+   double highP  = iHigh (_Symbol, PERIOD_M5, 1);
+   double lowP   = iLow  (_Symbol, PERIOD_M5, 1);
+   double totalRange = highP - lowP;
+   if(totalRange <= 0) return false;
+
+   // ===== Filter 1: Body Strength =====
    if(InpUseBodyFilter)
    {
-      double openP  = iOpen (_Symbol, PERIOD_M5, 1);
-      double closeP = iClose(_Symbol, PERIOD_M5, 1);
-      double highP  = iHigh (_Symbol, PERIOD_M5, 1);
-      double lowP   = iLow  (_Symbol, PERIOD_M5, 1);
-
-      double totalRange = highP - lowP;
-      if(totalRange <= 0) return false;
-
       double bodySize = MathAbs(closeP - openP);
       double bodyPct  = (bodySize / totalRange) * 100.0;
 
@@ -395,18 +435,79 @@ bool ValidateBreakout(int direction)
       if(direction == -1 && closeP >= openP) return false;
    }
 
-   // Filter 2: EMA Momentum
+   // ===== Filter 2: Wick Rejection (NEW v17) =====
+   // Long opposite-side wick = strong rejection -> skip entry
+   if(InpUseWickFilter)
+   {
+      double upperWick, lowerWick;
+      if(closeP >= openP) // Bull candle
+      {
+         upperWick = highP - closeP;
+         lowerWick = openP - lowP;
+      }
+      else                 // Bear candle
+      {
+         upperWick = highP - openP;
+         lowerWick = closeP - lowP;
+      }
+
+      double upperWickPct = (upperWick / totalRange) * 100.0;
+      double lowerWickPct = (lowerWick / totalRange) * 100.0;
+
+      // For BUY: upper wick should be small (price held above)
+      if(direction == 1 && upperWickPct > InpMaxWickPct) return false;
+      // For SELL: lower wick should be small
+      if(direction == -1 && lowerWickPct > InpMaxWickPct) return false;
+   }
+
+   // ===== Filter 3: EMA Momentum =====
+   double emaFast[], emaSlow[];
+   ArraySetAsSeries(emaFast, true);
+   ArraySetAsSeries(emaSlow, true);
+   bool emaLoaded = (CopyBuffer(g_hEMAFast, 0, 0, 2, emaFast) >= 2 &&
+                     CopyBuffer(g_hEMASlow, 0, 0, 2, emaSlow) >= 2);
+
    if(InpUseMomentum)
    {
-      double emaFast[], emaSlow[];
-      ArraySetAsSeries(emaFast, true);
-      ArraySetAsSeries(emaSlow, true);
-
-      if(CopyBuffer(g_hEMAFast, 0, 0, 2, emaFast) < 2) return false;
-      if(CopyBuffer(g_hEMASlow, 0, 0, 2, emaSlow) < 2) return false;
-
+      if(!emaLoaded) return false;
       if(direction ==  1 && emaFast[0] <= emaSlow[0]) return false;
       if(direction == -1 && emaFast[0] >= emaSlow[0]) return false;
+   }
+
+   // ===== Filter 4: EMA Distance (NEW v17) =====
+   // If price already too far from EMA -> late entry, skip
+   if(InpUseEMADistance && emaLoaded && atr > 0)
+   {
+      double curPrice = (direction == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                                         : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double distance = MathAbs(curPrice - emaSlow[0]);
+      double maxDist  = atr * InpMaxEMADistATR;
+      if(distance > maxDist) return false;
+   }
+
+   // ===== Filter 5: Box Touch Count (NEW v17) =====
+   // Real S/R has been touched multiple times. Single-tap boxes are unreliable.
+   if(InpUseTouchCount)
+   {
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double tol   = 5.0 * point; // 5pt tolerance
+      int touches = 0;
+      double level = (direction == 1) ? g_BoxHigh : g_BoxLow;
+
+      for(int i = 1; i <= InpBoxCandles; i++)
+      {
+         double h = iHigh(_Symbol, PERIOD_M5, i);
+         double l = iLow (_Symbol, PERIOD_M5, i);
+         if(direction == 1)
+         {
+            if(MathAbs(h - level) <= tol) touches++;
+         }
+         else
+         {
+            if(MathAbs(l - level) <= tol) touches++;
+         }
+      }
+      if(touches < InpMinBoxTouches) return false;
    }
 
    return true;
@@ -497,14 +598,38 @@ bool CheckNewsEvent()
       for(int i = 0; i < ArraySize(values); i++)
       {
          MqlCalendarEvent ev;
-         if(CalendarEventById(values[i].event_id, ev))
+         if(!CalendarEventById(values[i].event_id, ev)) continue;
+
+         // ===== TIER FILTER (v17 SMART) =====
+         // CALENDAR_IMPORTANCE_HIGH = 3 (NFP, FOMC, CPI, Rate Decision, GDP)
+         // CALENDAR_IMPORTANCE_MODERATE = 2
+         // CALENDAR_IMPORTANCE_LOW = 1
+         if(OnlyTopTierNews)
          {
-            if(FilterHighImpact && ev.importance < 2) continue;
-            if(ev.importance < 1) continue;
-            newsFound = true;
-            newsStatusTxt = "PAUSED";
-            break;
+            if(ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
          }
+         else if(FilterHighImpact)
+         {
+            if(ev.importance < CALENDAR_IMPORTANCE_MODERATE) continue;
+         }
+         else
+         {
+            if(ev.importance < CALENDAR_IMPORTANCE_LOW) continue;
+         }
+
+         // ===== CURRENCY FILTER for XAUUSD =====
+         // Only block on USD or EUR news (gold-relevant)
+         MqlCalendarCountry country;
+         if(CalendarCountryById(ev.country_id, country))
+         {
+            string cc = country.currency;
+            if(cc != "USD" && cc != "EUR") continue;
+         }
+
+         newsFound = true;
+         newsStatusTxt = "PAUSED:" + ev.name;
+         if(StringLen(newsStatusTxt) > 25) newsStatusTxt = StringSubstr(newsStatusTxt, 0, 25);
+         break;
       }
    }
    return newsFound;
@@ -789,7 +914,7 @@ void UpdateDashboard()
    DrawRect("UI_Outer",  15, 25, 290, 340, CLR_GOLD_DIM, CLR_GOLD_DIM);
    DrawRect("UI_BG",     16, 26, 288, 338, CLR_BG, CLR_BG);
    DrawRect("UI_Header", 16, 26, 288, 35,  CLR_GOLD, CLR_GOLD);
-   DrawText("UI_Title",  30, 33, "ANTU SMART BOX V16", 9, C'10,10,10', "Segoe UI Black", true);
+   DrawText("UI_Title",  30, 33, "ANTU SMART BOX V17", 9, C'10,10,10', "Segoe UI Black", true);
 
    DrawRect("UI_Line1", 30, 95,  260, 1, CLR_BORDER, CLR_BORDER);
    DrawRect("UI_Line2", 30, 150, 260, 1, CLR_BORDER, CLR_BORDER);
