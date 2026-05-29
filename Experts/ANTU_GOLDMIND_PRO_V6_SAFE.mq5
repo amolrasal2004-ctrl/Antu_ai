@@ -5,12 +5,18 @@
 //|        Philosophy: SMALL LOSS, STEADY GAIN, NEWS = NO TRADE      |
 //+------------------------------------------------------------------+
 #property copyright "ANTU Trading"
-#property version   "6.10"
+#property version   "6.20"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 CTrade trade;
+
+//================ LICENSE & PASSWORD SYSTEM =================//
+input group "=== License & Security ==="
+input string   InpLicenseKey         = "";       // License Key (get from ANTU Trading)
+input string   InpPassword           = "";       // EA Password (required to start)
+input int      InpTrialDays          = 7;        // Trial period days (0 = no trial)
 
 //================ MONEY MANAGEMENT =================//
 input group "=== Money Management ==="
@@ -18,6 +24,7 @@ input bool     InpUseRiskPercent     = true;     // Use % Risk (recommended)
 input double   InpRiskPercent        = 0.5;      // Risk % per trade (of balance)
 input double   InpFixedLotSize       = 0.01;     // Fixed Lot (if % off)
 input double   InpMaxLotCap          = 0.50;     // Max Lot Cap (safety)
+input double   InpMaxSLDollar        = 5.0;      // Max SL in $ (hard cap per trade)
 
 //================ SL / TP (TIGHT & SAFE) ==========//
 input group "=== Stop Loss / Take Profit ==="
@@ -26,6 +33,7 @@ input double   InpATRMultSL          = 1.8;      // ATR x for SL
 input double   InpATRMultTP          = 2.2;      // ATR x for TP (R:R ~1.2)
 input double   InpFixedSLPips        = 25.0;     // Fixed SL pips (if ATR off)
 input double   InpFixedTPPips        = 30.0;     // Fixed TP pips (if ATR off)
+
 
 //================ TRAILING / BREAKEVEN ============//
 input group "=== Trailing & Breakeven ==="
@@ -38,21 +46,22 @@ input double   InpTrailStepPips      = 8.0;      // Trail distance pips
 
 //================ DAILY GUARD =====================//
 input group "=== Daily Guard ==="
-input bool     InpUsePercentGuard    = true;     // Use % of balance (auto-scale) instead of fixed $
+input bool     InpUsePercentGuard    = true;     // Use % of balance (auto-scale)
 input double   InpDailyTargetPct     = 5.0;      // Daily Target % of balance
-input double   InpDailyMaxLossPct    = 5.0;      // Daily Max Loss % of balance (relaxed from 3%)
-input double   InpDailyTargetUSD     = 30.0;     // Daily Target $ (used if % guard OFF, 0 = unlimited)
-input double   InpDailyMaxLossUSD    = 15.0;     // Daily Max Loss $ (used if % guard OFF, 0 = unlimited)
-input int      InpMaxConsecutiveLoss = 3;        // Stop after N back-to-back losses (relaxed from 2)
-input int      InpMaxTradesPerDay    = 8;        // Max trades per day (relaxed from 6)
+input double   InpDailyMaxLossPct    = 5.0;      // Daily Max Loss % of balance
+input double   InpDailyTargetUSD     = 30.0;     // Daily Target $ (if % guard OFF)
+input double   InpDailyMaxLossUSD    = 15.0;     // Daily Max Loss $ (if % guard OFF)
+input int      InpMaxConsecutiveLoss = 3;        // Stop after N back-to-back losses
+input int      InpMaxTradesPerDay    = 8;        // Max trades per day
 
 //================ QUALITY FILTERS =================//
 input group "=== Quality Filters ==="
-input double   InpMinBandDistancePips = 50.0;    // Min BB width pips (relaxed from 80)
+input double   InpMinBandDistancePips = 50.0;    // Min BB width pips
 input int      InpMaxSpread          = 350;      // Max spread points
-input double   InpMinATRPips         = 10.0;     // Min ATR pips (relaxed from 15)
-input double   InpMaxATRPips         = 400.0;    // Max ATR pips (relaxed from 350)
+input double   InpMinATRPips         = 10.0;     // Min ATR pips
+input double   InpMaxATRPips         = 400.0;    // Max ATR pips
 input bool     InpUseATRMaxFilter    = true;     // Enable HIGH VOL block
+
 
 //================ TIME / NEWS GUARD ===============//
 input group "=== Time & News Guard ==="
@@ -61,12 +70,20 @@ input int      InpStartHour          = 8;        // Start hour (server time)
 input int      InpEndHour            = 21;       // End hour
 input bool     InpAvoidFridayLate    = true;     // No trade Fri after 19:00
 input bool     InpAvoidMondayOpen    = true;     // No trade Mon before 09:00
-input string   InpNewsTimes          = "13:30,15:00,18:00"; // High impact news HH:MM CSV (server time)
-input int      InpNewsBlockMinutes   = 15;       // Block X min before/after news (reduced from 30)
+input string   InpNewsTimes          = "13:30,15:00,18:00"; // News HH:MM CSV
+input int      InpNewsBlockMinutes   = 15;       // Block X min before/after news
+
+//================ NOTIFICATIONS ===================//
+input group "=== Mobile Notifications ==="
+input bool     InpSendPushNotify     = true;     // Send Push to Mobile
+input bool     InpSendAlert          = false;    // Show Alert popup on PC
+input bool     InpNotifyOnTrade      = true;     // Notify on trade open/close
+input bool     InpNotifyOnBlock      = false;    // Notify when blocked (target/loss hit)
 
 input group "=== System ==="
 input int      InpMagicNumber        = 654321;
 input string   InpComment            = "Goldmind V6 Safe";
+
 
 //================ DASHBOARD COLORS ================//
 #define CLR_BG_OUTER  C'150,120,40'
@@ -79,6 +96,10 @@ input string   InpComment            = "Goldmind V6 Safe";
 #define CLR_LOSS      C'255,70,70'
 #define CLR_WARN      C'255,180,50'
 
+//--- LICENSE CONSTANTS
+#define LICENSE_MASTER_PASS   "ANTU2024PRO"      // Master password
+#define LICENSE_SALT          "ANTU_GOLD_"       // License salt for key generation
+
 //--- Globals
 int      bb_handle, rsi_handle, atr_handle;
 double   bb_upper[], bb_lower[], rsi_buffer[], atr_buffer[];
@@ -89,9 +110,115 @@ double   cached_daily_profit = 0.0;
 int      cached_daily_trades = 0;
 int      cached_consec_losses = 0;
 int      current_day = -1;
+bool     license_valid = false;
+datetime trial_start_time = 0;
 
 datetime news_times_today[];
-double   pip_size;   // 0.01 for XAUUSD with 2-digit, 0.1 for 1-digit, set as 10*_Point
+double   pip_size;
+
+
+//+------------------------------------------------------------------+
+//| LICENSE & PASSWORD VALIDATION SYSTEM                              |
+//+------------------------------------------------------------------+
+bool ValidatePassword(){
+   if(StringLen(InpPassword)==0){
+      Print("ERROR: Password required! Contact ANTU Trading.");
+      return false;
+   }
+   if(InpPassword != LICENSE_MASTER_PASS){
+      Print("ERROR: Invalid password! Contact ANTU Trading.");
+      return false;
+   }
+   return true;
+}
+
+string GenerateLicenseKey(long accountNum){
+   // Simple license key = SALT + account number hash
+   string raw = LICENSE_SALT + IntegerToString(accountNum);
+   int hash = 0;
+   for(int i=0; i<StringLen(raw); i++){
+      hash = hash * 31 + StringGetCharacter(raw, i);
+      hash = hash % 999999;
+   }
+   if(hash < 0) hash = -hash;
+   return "ANTU-" + IntegerToString(hash, 6, '0');
+}
+
+bool ValidateLicense(){
+   long accNum = AccountInfoInteger(ACCOUNT_LOGIN);
+   
+   // Check if license key matches
+   if(StringLen(InpLicenseKey) > 0){
+      string validKey = GenerateLicenseKey(accNum);
+      if(InpLicenseKey == validKey){
+         Print("LICENSE VALID: Full access granted. Account: ", accNum);
+         return true;
+      }
+   }
+   
+   // Check trial period
+   if(InpTrialDays > 0){
+      datetime firstRun = (datetime)GlobalVariableGet("ANTU_FIRST_RUN_" + IntegerToString(accNum));
+      if(firstRun == 0){
+         // First time running - start trial
+         firstRun = TimeCurrent();
+         GlobalVariableSet("ANTU_FIRST_RUN_" + IntegerToString(accNum), (double)firstRun);
+         trial_start_time = firstRun;
+         int daysLeft = InpTrialDays;
+         Print("TRIAL STARTED: ", daysLeft, " days free trial. Account: ", accNum);
+         SendNotify("ANTU EA: Trial started! " + IntegerToString(daysLeft) + " days remaining.");
+         return true;
+      }
+      
+      trial_start_time = firstRun;
+      int elapsed = (int)((TimeCurrent() - firstRun) / 86400);
+      int daysLeft = InpTrialDays - elapsed;
+      
+      if(daysLeft > 0){
+         Print("TRIAL ACTIVE: ", daysLeft, " days remaining. Account: ", accNum);
+         return true;
+      } else {
+         Print("TRIAL EXPIRED! Contact ANTU Trading for license. Account: ", accNum);
+         SendNotify("ANTU EA: Trial EXPIRED! Contact ANTU Trading for license key.");
+         return false;
+      }
+   }
+   
+   Print("NO LICENSE: Enter valid key or enable trial. Account: ", accNum);
+   return false;
+}
+
+
+//+------------------------------------------------------------------+
+//| NOTIFICATION SYSTEM                                              |
+//+------------------------------------------------------------------+
+void SendNotify(string msg){
+   if(InpSendPushNotify)
+      SendNotification(msg);
+   if(InpSendAlert)
+      Alert(msg);
+   Print(msg);
+}
+
+void NotifyTradeOpen(string direction, double lot, double sl, double tp){
+   if(!InpNotifyOnTrade) return;
+   string msg = "ANTU EA: " + direction + " opened | Lot=" + DoubleToString(lot,2)
+              + " | SL=" + DoubleToString(sl,2) + " | TP=" + DoubleToString(tp,2)
+              + " | " + _Symbol;
+   SendNotify(msg);
+}
+
+void NotifyTradeFail(string direction, int code, string desc){
+   if(!InpNotifyOnTrade) return;
+   string msg = "ANTU EA: " + direction + " FAILED! Code=" + IntegerToString(code)
+              + " " + desc;
+   SendNotify(msg);
+}
+
+void NotifyBlock(string reason){
+   if(!InpNotifyOnBlock) return;
+   SendNotify("ANTU EA: Trading BLOCKED - " + reason);
+}
 
 //+------------------------------------------------------------------+
 //| Pip helper (XAUUSD friendly: 1 pip = 0.10 price = 10 points)     |
@@ -115,6 +242,25 @@ int CountMyPositions(){
    return count;
 }
 
+
+//+------------------------------------------------------------------+
+//| MAX SL $ CAP - Calculate max lot so SL never exceeds $X          |
+//+------------------------------------------------------------------+
+double CalcMaxLotForDollarSL(double slPips){
+   if(InpMaxSLDollar <= 0) return InpMaxLotCap; // disabled
+   
+   double tickVal  = SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE);
+   double tickSize = SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tickVal<=0 || tickSize<=0) return InpFixedLotSize;
+   
+   double slPrice = PipsToPrice(slPips);
+   double lossPerLot = (slPrice / tickSize) * tickVal;
+   if(lossPerLot<=0) return InpFixedLotSize;
+   
+   double maxLot = InpMaxSLDollar / lossPerLot;
+   return maxLot;
+}
+
 //+------------------------------------------------------------------+
 //| Dashboard Drawing                                                |
 //+------------------------------------------------------------------+
@@ -129,6 +275,7 @@ void DrawRect(string name,int x,int y,int w,int h,color bg){
    ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
    ObjectSetInteger(0,name,OBJPROP_BACK,false);
 }
+
 void DrawText(string name,int x,int y,string txt,int sz,color clr,string font="Segoe UI",bool bold=false){
    if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_LABEL,0,0,0);
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
@@ -140,9 +287,10 @@ void DrawText(string name,int x,int y,string txt,int sz,color clr,string font="S
    ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
 }
 
+
 void UpdateDashboard(double pnl,int spread,double band_dist,double atrPips,string status){
-   DrawRect("UI_Outer",20,30,310,300,CLR_BG_OUTER);
-   DrawRect("UI_Inner",22,32,306,296,CLR_BG_INNER);
+   DrawRect("UI_Outer",20,30,310,320,CLR_BG_OUTER);
+   DrawRect("UI_Inner",22,32,306,316,CLR_BG_INNER);
    DrawRect("UI_Header",22,32,306,40,CLR_HEADER);
    DrawText("UI_Title",45,40,"ANTU GOLDMIND PRO V6 SAFE",11,C'15,15,15',"Segoe UI Black",true);
 
@@ -153,6 +301,7 @@ void UpdateDashboard(double pnl,int spread,double band_dist,double atrPips,strin
    color stC = CLR_PROFIT;
    if(status=="TARGET HIT" || status=="LOSS HIT" || status=="MAX LOSSES") stC = CLR_LOSS;
    else if(status=="NEWS BLOCK" || status=="HIGH SPREAD" || status=="LOW VOL" || status=="HIGH VOL") stC = CLR_WARN;
+   else if(status=="EXPIRED" || status=="NO LICENSE") stC = CLR_LOSS;
    else if(status!="ACTIVE") stC = CLR_TXT_MUTED;
 
    DrawText("L_Status",40,80,"SYSTEM STATUS",8,CLR_TXT_MUTED,"Segoe UI",true);
@@ -183,13 +332,46 @@ void UpdateDashboard(double pnl,int spread,double band_dist,double atrPips,strin
    DrawText("L_MyPos",40,270,"MY POSITIONS",8,CLR_TXT_MUTED,"Segoe UI",true);
    DrawText("V_MyPos",180,270,IntegerToString(CountMyPositions()),8,CLR_TXT_WHITE,"Consolas",true);
 
-   DrawText("UI_Footer",85,305,"POWERED BY ANTU TRADING",7,CLR_BG_OUTER,"Segoe UI",true);
+   DrawText("L_MaxSL",40,285,"MAX SL CAP",8,CLR_TXT_MUTED,"Segoe UI",true);
+   DrawText("V_MaxSL",180,285,"$"+DoubleToString(InpMaxSLDollar,2),8,CLR_WARN,"Consolas",true);
+
+   // License info
+   string licInfo = license_valid ? "LICENSED" : "TRIAL";
+   if(trial_start_time > 0 && !license_valid){
+      int elapsed = (int)((TimeCurrent() - trial_start_time) / 86400);
+      int daysLeft = InpTrialDays - elapsed;
+      licInfo = "TRIAL: " + IntegerToString(daysLeft) + "d left";
+   }
+   DrawText("L_Lic",40,300,"LICENSE",8,CLR_TXT_MUTED,"Segoe UI",true);
+   DrawText("V_Lic",180,300,licInfo,8,license_valid?CLR_PROFIT:CLR_WARN,"Consolas",true);
+
+   DrawText("UI_Footer",85,325,"POWERED BY ANTU TRADING",7,CLR_BG_OUTER,"Segoe UI",true);
 }
+
 
 //+------------------------------------------------------------------+
 //| Init / Deinit                                                    |
 //+------------------------------------------------------------------+
 int OnInit(){
+   // PASSWORD CHECK
+   if(!ValidatePassword()){
+      Alert("ANTU EA: Invalid Password! EA will not start.");
+      return(INIT_FAILED);
+   }
+   
+   // LICENSE CHECK
+   license_valid = false;
+   long accNum = AccountInfoInteger(ACCOUNT_LOGIN);
+   string validKey = GenerateLicenseKey(accNum);
+   if(StringLen(InpLicenseKey) > 0 && InpLicenseKey == validKey){
+      license_valid = true;
+   }
+   
+   if(!ValidateLicense()){
+      Alert("ANTU EA: License expired or invalid! Contact ANTU Trading.");
+      return(INIT_FAILED);
+   }
+
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetTypeFillingBySymbol(_Symbol);
    trade.SetMarginMode();
@@ -209,7 +391,11 @@ int OnInit(){
    ArraySetAsSeries(atr_buffer,true);
 
    ParseNewsTimes();
-   Print("ANTU GOLDMIND PRO V6 SAFE initialized successfully. Magic=",InpMagicNumber);
+   
+   string startMsg = "ANTU GOLDMIND PRO V6 started! Account: " + IntegerToString(accNum)
+                   + " | MaxSL: $" + DoubleToString(InpMaxSLDollar,2);
+   SendNotify(startMsg);
+   
    return(INIT_SUCCEEDED);
 }
 
@@ -221,6 +407,7 @@ void OnDeinit(const int reason){
    IndicatorRelease(rsi_handle);
    IndicatorRelease(atr_handle);
 }
+
 
 //+------------------------------------------------------------------+
 //| Parse "13:30,15:00,18:00" -> datetime[] for today               |
@@ -260,7 +447,7 @@ bool IsNewsBlock(){
 }
 
 //+------------------------------------------------------------------+
-//| Daily stats: profit, trade count, consecutive losses             |
+//| Daily stats                                                      |
 //+------------------------------------------------------------------+
 void RefreshDailyStats(){
    MqlDateTime dt; TimeCurrent(dt);
@@ -270,7 +457,7 @@ void RefreshDailyStats(){
       cached_daily_trades = 0;
       cached_consec_losses = 0;
       last_deals_total = 0;
-      ParseNewsTimes(); // refresh news for new day
+      ParseNewsTimes();
    }
 
    datetime startOfDay = TimeCurrent() - (TimeCurrent() % 86400);
@@ -302,6 +489,7 @@ void RefreshDailyStats(){
    last_deals_total     = deals;
 }
 
+
 //+------------------------------------------------------------------+
 //| Time filter                                                      |
 //+------------------------------------------------------------------+
@@ -315,23 +503,32 @@ bool IsTradingTime(){
 }
 
 //+------------------------------------------------------------------+
-//| Lot calculator (% risk based)                                    |
+//| Lot calculator (% risk based + $5 MAX SL CAP)                    |
 //+------------------------------------------------------------------+
 double CalcLot(double slPips){
-   if(!InpUseRiskPercent) return NormalizeLot(InpFixedLotSize);
+   double lot;
+   
+   if(!InpUseRiskPercent){
+      lot = InpFixedLotSize;
+   } else {
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      double riskUsd = balance * InpRiskPercent / 100.0;
 
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskUsd = balance * InpRiskPercent / 100.0;
+      double tickVal  = SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE);
+      double tickSize = SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+      if(tickVal<=0 || tickSize<=0) return NormalizeLot(InpFixedLotSize);
 
-   double tickVal  = SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE);
-   double tickSize = SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
-   if(tickVal<=0 || tickSize<=0) return NormalizeLot(InpFixedLotSize);
+      double slPrice = PipsToPrice(slPips);
+      double lossPerLot = (slPrice / tickSize) * tickVal;
+      if(lossPerLot<=0) return NormalizeLot(InpFixedLotSize);
 
-   double slPrice = PipsToPrice(slPips);
-   double lossPerLot = (slPrice / tickSize) * tickVal;
-   if(lossPerLot<=0) return NormalizeLot(InpFixedLotSize);
-
-   double lot = riskUsd / lossPerLot;
+      lot = riskUsd / lossPerLot;
+   }
+   
+   // HARD CAP: Ensure SL never exceeds $X
+   double maxLotByCap = CalcMaxLotForDollarSL(slPips);
+   lot = MathMin(lot, maxLotByCap);
+   
    return NormalizeLot(lot);
 }
 
@@ -346,6 +543,7 @@ double NormalizeLot(double lot){
    lot = MathMin(lot, InpMaxLotCap);
    return NormalizeDouble(lot,2);
 }
+
 
 //+------------------------------------------------------------------+
 //| Trailing stop / Breakeven                                        |
@@ -369,24 +567,19 @@ void ManageOpenPositions(){
 
       if(type==POSITION_TYPE_BUY){
          double profitPips = PriceToPips(bid - open);
-
-         // Breakeven
          if(InpUseBreakeven && profitPips >= InpBEActivatePips){
             double be = open + PipsToPrice(InpBEOffsetPips);
             if(sl < be) newSL = be;
          }
-         // Trailing
          if(InpUseTrailing && profitPips >= InpTrailStartPips){
             double trail = bid - PipsToPrice(InpTrailStepPips);
             if(trail > newSL) newSL = trail;
          }
-         if(newSL > sl + _Point){
+         if(newSL > sl + _Point)
             trade.PositionModify(ticket,NormalizeDouble(newSL,_Digits),tp);
-         }
       }
       else if(type==POSITION_TYPE_SELL){
          double profitPips = PriceToPips(open - ask);
-
          if(InpUseBreakeven && profitPips >= InpBEActivatePips){
             double be = open - PipsToPrice(InpBEOffsetPips);
             if(sl==0 || sl > be) newSL = be;
@@ -395,12 +588,12 @@ void ManageOpenPositions(){
             double trail = ask + PipsToPrice(InpTrailStepPips);
             if(newSL==0 || trail < newSL) newSL = trail;
          }
-         if(newSL!=sl && (sl==0 || newSL < sl - _Point)){
+         if(newSL!=sl && (sl==0 || newSL < sl - _Point))
             trade.PositionModify(ticket,NormalizeDouble(newSL,_Digits),tp);
-         }
       }
    }
 }
+
 
 //+------------------------------------------------------------------+
 //| OnTick                                                           |
@@ -418,11 +611,9 @@ void OnTick(){
    double bandPips = PriceToPips(bb_upper[0]-bb_lower[0]);
    double atrPips  = PriceToPips(atr_buffer[0]);
 
-   //-------- Status logic
    string status = "ACTIVE";
    bool blocked = false;
 
-   // Calculate effective target/loss limits
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double targetUSD, maxLossUSD;
    if(InpUsePercentGuard){
@@ -433,10 +624,20 @@ void OnTick(){
       maxLossUSD = InpDailyMaxLossUSD;
    }
 
-   if(targetUSD > 0 && cached_daily_profit >= targetUSD){ status="TARGET HIT"; blocked=true; }
-   else if(maxLossUSD > 0 && cached_daily_profit <= -maxLossUSD){ status="LOSS HIT"; blocked=true; }
-   else if(InpMaxConsecutiveLoss > 0 && cached_consec_losses >= InpMaxConsecutiveLoss){ status="MAX LOSSES"; blocked=true; }
-   else if(InpMaxTradesPerDay > 0 && cached_daily_trades >= InpMaxTradesPerDay){ status="MAX TRADES"; blocked=true; }
+   if(targetUSD > 0 && cached_daily_profit >= targetUSD){
+      status="TARGET HIT"; blocked=true;
+      NotifyBlock("Daily target hit! P/L=$"+DoubleToString(cached_daily_profit,2));
+   }
+   else if(maxLossUSD > 0 && cached_daily_profit <= -maxLossUSD){
+      status="LOSS HIT"; blocked=true;
+      NotifyBlock("Daily loss limit hit! P/L=$"+DoubleToString(cached_daily_profit,2));
+   }
+   else if(InpMaxConsecutiveLoss > 0 && cached_consec_losses >= InpMaxConsecutiveLoss){
+      status="MAX LOSSES"; blocked=true;
+   }
+   else if(InpMaxTradesPerDay > 0 && cached_daily_trades >= InpMaxTradesPerDay){
+      status="MAX TRADES"; blocked=true;
+   }
    else if(!IsTradingTime()){ status="SLEEPING"; blocked=true; }
    else if(IsNewsBlock()){ status="NEWS BLOCK"; blocked=true; }
    else if(spread > InpMaxSpread){ status="HIGH SPREAD"; blocked=true; }
@@ -447,11 +648,8 @@ void OnTick(){
    UpdateDashboard(cached_daily_profit, spread, bandPips, atrPips, status);
 
    if(blocked) return;
+   if(CountMyPositions() > 0) return;
 
-   //--- FIX: Only count OUR positions (magic + symbol filtered)
-   if(CountMyPositions() > 0) return; // one trade at a time for THIS EA
-
-   // New bar only
    datetime ct = iTime(_Symbol,PERIOD_CURRENT,0);
    if(ct == last_bar_time) return;
 
@@ -462,14 +660,12 @@ void OnTick(){
    double bid = SymbolInfoDouble(_Symbol,SYMBOL_BID);
    double last_close = iClose(_Symbol,PERIOD_CURRENT,1);
 
-   // Calculate SL/TP
    double slPips, tpPips;
    if(InpUseATRStops){
       slPips = atrPips * InpATRMultSL;
       tpPips = atrPips * InpATRMultTP;
-      // Hard cap so news-late spikes can't over-extend SL
       slPips = MathMin(slPips, InpFixedSLPips * 1.5);
-      tpPips = MathMax(tpPips, slPips * 1.1); // keep R:R >= 1.1
+      tpPips = MathMax(tpPips, slPips * 1.1);
    } else {
       slPips = InpFixedSLPips;
       tpPips = InpFixedTPPips;
@@ -478,17 +674,16 @@ void OnTick(){
    double lot = CalcLot(slPips);
    if(lot<=0) return;
 
+
    //-------- BUY SIGNAL
    if(last_close <= bb_lower[1] && rsi_buffer[0] < 35.0){
       double sl = ask - PipsToPrice(slPips);
       double tp = ask + PipsToPrice(tpPips);
-      if(!trade.Buy(lot,_Symbol,ask,
-                    NormalizeDouble(sl,_Digits),
-                    NormalizeDouble(tp,_Digits),
-                    InpComment))
-         PrintFormat("Buy failed: %d %s",trade.ResultRetcode(),trade.ResultRetcodeDescription());
-      else
-         PrintFormat("BUY opened: Lot=%.2f SL=%.1f pips TP=%.1f pips",lot,slPips,tpPips);
+      if(!trade.Buy(lot,_Symbol,ask,NormalizeDouble(sl,_Digits),NormalizeDouble(tp,_Digits),InpComment)){
+         NotifyTradeFail("BUY",trade.ResultRetcode(),trade.ResultRetcodeDescription());
+      } else {
+         NotifyTradeOpen("BUY",lot,sl,tp);
+      }
       return;
    }
 
@@ -496,13 +691,11 @@ void OnTick(){
    if(last_close >= bb_upper[1] && rsi_buffer[0] > 65.0){
       double sl = bid + PipsToPrice(slPips);
       double tp = bid - PipsToPrice(tpPips);
-      if(!trade.Sell(lot,_Symbol,bid,
-                     NormalizeDouble(sl,_Digits),
-                     NormalizeDouble(tp,_Digits),
-                     InpComment))
-         PrintFormat("Sell failed: %d %s",trade.ResultRetcode(),trade.ResultRetcodeDescription());
-      else
-         PrintFormat("SELL opened: Lot=%.2f SL=%.1f pips TP=%.1f pips",lot,slPips,tpPips);
+      if(!trade.Sell(lot,_Symbol,bid,NormalizeDouble(sl,_Digits),NormalizeDouble(tp,_Digits),InpComment)){
+         NotifyTradeFail("SELL",trade.ResultRetcode(),trade.ResultRetcodeDescription());
+      } else {
+         NotifyTradeOpen("SELL",lot,sl,tp);
+      }
       return;
    }
 }
