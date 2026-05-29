@@ -5,7 +5,7 @@
 //|        Philosophy: SMALL LOSS, STEADY GAIN, NEWS = NO TRADE      |
 //+------------------------------------------------------------------+
 #property copyright "ANTU Trading"
-#property version   "6.20"
+#property version   "6.30"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -17,6 +17,8 @@ input group "=== License & Security ==="
 input string   InpPassword           = "";       // EA Password (required)
 input string   InpLicenseKey         = "";       // License Key (get from ANTU Trading)
 input int      InpTrialDays          = 7;        // Trial period days (0=no trial)
+input string   InpAdminPassword      = "";       // Admin Password (for key generator)
+
 
 //================ MONEY MANAGEMENT =================//
 input group "=== Money Management ==="
@@ -72,6 +74,7 @@ input bool     InpAvoidMondayOpen    = true;     // No trade Mon before 09:00
 input string   InpNewsTimes          = "13:30,15:00,18:00"; // News HH:MM CSV
 input int      InpNewsBlockMinutes   = 15;       // Block X min before/after
 
+
 //================ NOTIFICATIONS ===================//
 input group "=== Mobile Notifications ==="
 input bool     InpSendPushNotify     = true;     // Send Push to Mobile
@@ -82,7 +85,6 @@ input bool     InpNotifyOnBlock      = false;    // Notify when blocked
 input group "=== System ==="
 input int      InpMagicNumber        = 654321;
 input string   InpComment            = "Goldmind V6 Safe";
-
 
 //================ DASHBOARD COLORS ================//
 #define CLR_BG_OUTER  C'150,120,40'
@@ -97,7 +99,9 @@ input string   InpComment            = "Goldmind V6 Safe";
 
 //--- LICENSE CONSTANTS
 #define LICENSE_MASTER_PASS   "ANTU2024PRO"
+#define LICENSE_ADMIN_PASS    "ANTUADMIN99"
 #define LICENSE_SALT          "ANTU_GOLD_"
+
 
 //--- Globals
 int      bb_handle, rsi_handle, atr_handle;
@@ -111,6 +115,7 @@ int      cached_consec_losses = 0;
 int      current_day = -1;
 bool     license_valid = false;
 datetime trial_start_time = 0;
+bool     admin_mode = false;
 
 datetime news_times_today[];
 
@@ -141,13 +146,15 @@ void NotifyTradeOpen(string direction,double lot,double slPips,double tpPips){
 void NotifyBlock(string reason){
    if(!InpNotifyOnBlock) return;
    static string lastReason = "";
-   if(reason == lastReason) return; // don't spam
+   if(reason == lastReason) return;
    lastReason = reason;
    SendNotify("ANTU EA: BLOCKED - " + reason);
 }
 
+
 //+------------------------------------------------------------------+
-//| LICENSE & PASSWORD SYSTEM                                        |
+//| LICENSE KEY GENERATOR (Built-in Admin Panel)                     |
+//| Admin password se khulega, account number daalo, key milegi      |
 //+------------------------------------------------------------------+
 string GenerateLicenseKey(long accountNum){
    string raw = LICENSE_SALT + IntegerToString(accountNum);
@@ -160,7 +167,42 @@ string GenerateLicenseKey(long accountNum){
    return "ANTU-" + IntegerToString(hash, 6, '0');
 }
 
+void ShowKeyGeneratorPanel(){
+   // Admin mode - show key for current account
+   long accNum = AccountInfoInteger(ACCOUNT_LOGIN);
+   string key = GenerateLicenseKey(accNum);
+   
+   string msg = "========= ANTU KEY GENERATOR =========\n"
+              + "Account Number: " + IntegerToString(accNum) + "\n"
+              + "License Key: " + key + "\n"
+              + "======================================\n"
+              + "Yeh key client ko do.\n"
+              + "Client EA settings mein License Key field mein paste karega.";
+   
+   Alert(msg);
+   Print("=== KEY GENERATOR ===");
+   Print("Account: ", accNum);
+   Print("Key: ", key);
+   Print("=====================");
+   
+   // Also show on chart as comment
+   Comment("ANTU KEY GENERATOR\n"
+          +"Account: "+IntegerToString(accNum)+"\n"
+          +"License Key: "+key+"\n\n"
+          +"Yeh key client ko do!");
+}
+
+
+//+------------------------------------------------------------------+
+//| PASSWORD & LICENSE VALIDATION                                    |
+//+------------------------------------------------------------------+
 bool ValidatePassword(){
+   // Check if admin mode (key generator)
+   if(InpAdminPassword == LICENSE_ADMIN_PASS){
+      admin_mode = true;
+      return true;
+   }
+   
    if(StringLen(InpPassword)==0){
       Print("ERROR: Password required! Contact ANTU Trading.");
       return false;
@@ -172,8 +214,10 @@ bool ValidatePassword(){
    return true;
 }
 
-
 bool ValidateLicense(){
+   // Admin mode doesn't need license
+   if(admin_mode) return true;
+   
    long accNum = AccountInfoInteger(ACCOUNT_LOGIN);
 
    // Check license key
@@ -215,6 +259,7 @@ bool ValidateLicense(){
    return false;
 }
 
+
 //+------------------------------------------------------------------+
 //| Count OUR positions                                              |
 //+------------------------------------------------------------------+
@@ -231,7 +276,6 @@ int CountMyPositions(){
    return count;
 }
 
-
 //+------------------------------------------------------------------+
 //| MAX SL $ CAP                                                     |
 //+------------------------------------------------------------------+
@@ -245,6 +289,7 @@ double CalcMaxLotForDollarSL(double slPips){
    if(lossPerLot<=0) return InpFixedLotSize;
    return InpMaxSLDollar / lossPerLot;
 }
+
 
 //+------------------------------------------------------------------+
 //| Lot calculator with $5 MAX SL CAP                                |
@@ -264,7 +309,6 @@ double CalcLot(double slPips){
       if(lossPerLot<=0) return NormalizeLot(InpFixedLotSize);
       lot = riskUsd / lossPerLot;
    }
-   // HARD CAP: SL never exceeds $X
    double maxLotByCap = CalcMaxLotForDollarSL(slPips);
    lot = MathMin(lot, maxLotByCap);
    return NormalizeLot(lot);
@@ -321,7 +365,7 @@ void UpdateDashboard(double pnl,int spread,double band_dist,double atrPips,strin
    DrawRect("UI_Line3",40,225,270,1,CLR_LINE);
 
    color stC = CLR_PROFIT;
-   if(status=="TARGET HIT"||status=="LOSS HIT"||status=="MAX LOSSES"||status=="EXPIRED"||status=="NO LICENSE") stC=CLR_LOSS;
+   if(status=="TARGET HIT"||status=="LOSS HIT"||status=="MAX LOSSES") stC=CLR_LOSS;
    else if(status=="NEWS BLOCK"||status=="HIGH SPREAD"||status=="LOW VOL"||status=="HIGH VOL") stC=CLR_WARN;
    else if(status!="ACTIVE") stC=CLR_TXT_MUTED;
 
@@ -339,10 +383,10 @@ void UpdateDashboard(double pnl,int spread,double band_dist,double atrPips,strin
    DrawText("V_BBW",180,190,DoubleToString(band_dist,1)+" / "+DoubleToString(InpMinBandDistancePips,0),8,
             band_dist<InpMinBandDistancePips?CLR_WARN:CLR_TXT_WHITE,"Consolas",true);
 
+
    DrawText("L_ATR",40,205,"ATR (PIPS)",8,CLR_TXT_MUTED,"Segoe UI",true);
    DrawText("V_ATR",180,205,DoubleToString(atrPips,1),8,
             (atrPips<InpMinATRPips||atrPips>InpMaxATRPips)?CLR_WARN:CLR_TXT_WHITE,"Consolas",true);
-
 
    DrawText("L_Trades",40,240,"TRADES TODAY",8,CLR_TXT_MUTED,"Segoe UI",true);
    DrawText("V_Trades",180,240,IntegerToString(cached_daily_trades)+" / "+IntegerToString(InpMaxTradesPerDay),8,CLR_TXT_WHITE,"Consolas",true);
@@ -382,6 +426,16 @@ int OnInit(){
       Alert("ANTU EA: Invalid Password! Contact ANTU Trading.");
       return(INIT_FAILED);
    }
+   
+   // ADMIN MODE - Show Key Generator and stop
+   if(admin_mode){
+      ShowKeyGeneratorPanel();
+      Print("=== ADMIN MODE: Key Generator Active ===");
+      Print("Attach EA to CLIENT's account to see their key.");
+      Print("Or check Experts tab for current account key.");
+      return(INIT_SUCCEEDED);
+   }
+   
    // LICENSE CHECK
    license_valid = false;
    if(!ValidateLicense()){
@@ -414,6 +468,7 @@ int OnInit(){
 }
 
 void OnDeinit(const int reason){
+   Comment("");
    ObjectsDeleteAll(0,"UI_");
    ObjectsDeleteAll(0,"L_");
    ObjectsDeleteAll(0,"V_");
@@ -458,6 +513,7 @@ bool IsNewsBlock(){
    return false;
 }
 
+
 //+------------------------------------------------------------------+
 //| Daily Stats                                                      |
 //+------------------------------------------------------------------+
@@ -475,7 +531,6 @@ void RefreshDailyStats(){
    HistorySelect(startOfDay, TimeCurrent());
    int deals = HistoryDealsTotal();
    if(deals == last_deals_total) return;
-
 
    double profit = 0.0;
    int trades = 0;
@@ -567,6 +622,9 @@ void ManageOpenPositions(){
 //| OnTick                                                           |
 //+------------------------------------------------------------------+
 void OnTick(){
+   // Admin mode - no trading, only key generator
+   if(admin_mode) return;
+   
    RefreshDailyStats();
    ManageOpenPositions();
 
