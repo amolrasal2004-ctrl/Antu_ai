@@ -4,7 +4,7 @@
 //|        Target Asset: XAUUSD (Gold)                               |
 //|        Philosophy: SMALL LOSS, STEADY GAIN, NEWS = NO TRADE      |
 //+------------------------------------------------------------------+
-#property copyright "Kiran Group"
+#property copyright "ANTU Trading"
 #property version   "6.10"
 #property strict
 
@@ -183,7 +183,7 @@ void UpdateDashboard(double pnl,int spread,double band_dist,double atrPips,strin
    DrawText("L_MyPos",40,270,"MY POSITIONS",8,CLR_TXT_MUTED,"Segoe UI",true);
    DrawText("V_MyPos",180,270,IntegerToString(CountMyPositions()),8,CLR_TXT_WHITE,"Consolas",true);
 
-   DrawText("UI_Footer",95,305,"DEVELOPED BY KIRAN GROUP",7,CLR_BG_OUTER,"Segoe UI",true);
+   DrawText("UI_Footer",85,305,"POWERED BY ANTU TRADING",7,CLR_BG_OUTER,"Segoe UI",true);
 }
 
 //+------------------------------------------------------------------+
