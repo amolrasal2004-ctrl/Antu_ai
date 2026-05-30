@@ -1,879 +1,364 @@
 //+------------------------------------------------------------------+
-//|                              XAU_Range_Scalper_Pro_Final.mq5     |
-//|                                          Copyright 2026, Antu AI |
-//|                                                                  |
-//|  FINAL all-in-one EA for XAUUSD M5 range scalping.               |
-//|  - Single file, no external include files needed                 |
-//|  - Balanced filters: enough trades but quality entries           |
-//|  - Compiled & tested clean (0 errors, 0 warnings)                |
+//| XAU_Range_Scalper_Pro_Final.mq5                                  |
+//| Strategy: Donchian Channel Breakout + ATR Momentum               |
+//| Timeframe: M15 | Target: XAUUSD                                 |
+//| Style: BIG TRADE CAPTURE                                         |
+//| COPYRIGHT: ANTU Trading                                          |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Antu AI"
+#property copyright "ANTU Trading"
 #property version   "2.00"
 #property strict
-#property description "XAU Range Scalper Pro FINAL - XAUUSD M5"
-
 #include <Trade/Trade.mqh>
-#include <Trade/PositionInfo.mqh>
+CTrade trade;
 
-//============================== INPUTS ==============================
+//================ LICENSE =================//
+input group "=== License & Security ==="
+input string InpPassword="";
+input string InpLicenseKey="";
+input int    InpTrialDays=7;
+input string InpAdminPassword="";
 
-input group "=== General ==="
-input ulong  InpMagic                = 20260525;
-input string InpTradeComment          = "XAU_RSP";
-input bool   InpAllowOnlyXAU          = true;
-input bool   InpDrawObjects           = true;
-input bool   InpShowDashboard         = true;
-input bool   InpPushAlerts            = false;
-input string InpLogFileName           = "XAU_RSP_log.txt";
+//================ MONEY =================//
+input group "=== Money Management ==="
+input double InpRiskPercent=1.0;
+input double InpFixedLot=0.01;
+input double InpMaxLotCap=0.50;
+input double InpMaxSLDollar=5.0;
 
-input group "=== Risk ==="
-input double InpRiskPercent           = 1.0;
-input double InpMaxDailyLossPercent   = 3.0;
-input int    InpMaxOpenTrades         = 1;
+//================ CHANNEL =================//
+input group "=== Channel Breakout ==="
+input int    InpChannelPeriod=20;
+input int    InpATRPeriod=14;
+input double InpATRMinMult=0.8;
 
-input group "=== Range Detection ==="
-input int    InpRangeLookback         = 40;
-input int    InpMinTouchesPerSide     = 2;
-input double InpTouchTolerancePoints  = 300;
-input double InpAtrMaxRatio           = 0.50;
-input int    InpBreakoutCooldownBars  = 15;
+//================ SL/TP =================//
+input group "=== Stop Loss / Take Profit ==="
+input double InpSL_ATR_Mult=1.5;
+input double InpTP_ATR_Mult=4.0;
 
-input group "=== Indicators ==="
-input int    InpAtrPeriod             = 14;
-input int    InpAdxPeriod             = 14;
-input double InpAdxMax                = 35.0;
-input int    InpRsiPeriod             = 14;
-input double InpRsiBuyMax             = 40.0;
-input double InpRsiSellMin            = 60.0;
+//================ PROTECTION =================//
+input group "=== Profit Protection ==="
+input bool   InpUseBreakeven=true;
+input double InpBE_ATR_Mult=1.0;
+input double InpBE_LockPips=3.0;
+input bool   InpUseTrailing=true;
+input bool   InpTrailByChannel=true;
+input double InpTrail_ATR_Mult=1.5;
 
-input group "=== SL / TP ==="
-input double InpSlAtrMultiplier       = 1.5;
-input double InpTpRRMultiplier        = 1.5;
-input bool   InpTpAtRangeOpposite     = true;
+//================ PARTIAL =================//
+input group "=== Partial Close ==="
+input bool   InpUsePartial=true;
+input double InpPartialPct=50.0;
+input double InpPartialMult=2.0;
 
-input group "=== Trade Management ==="
-input bool   InpUseBreakEven          = true;
-input double InpBreakEvenTriggerPts   = 600;
-input double InpBreakEvenLockPts      = 50;
-input bool   InpUseTrailing           = true;
-input double InpTrailStartPoints      = 1000;
-input double InpTrailStepPoints       = 500;
+//================ DAILY =================//
+input group "=== Daily Guard ==="
+input bool   InpUseDailyLimit=true;
+input double InpDailyTarget=20.0;
+input double InpDailyMaxLoss=10.0;
+input int    InpMaxConsecLoss=3;
+input int    InpMaxTrades=6;
 
-input group "=== Filters ==="
-input int    InpSpreadLimitPoints     = 60;
-input int    InpSlippagePoints        = 30;
-input bool   InpUseSessionFilter      = false;
-input int    InpSessionStartHour      = 7;
-input int    InpSessionEndHour        = 20;
-input bool   InpAvoidLondonOpen       = false;
-input bool   InpAvoidNYOpen           = false;
-input int    InpLondonOpenHour        = 10;
-input int    InpNyOpenHour            = 15;
-input int    InpAvoidMinutesAround    = 15;
+//================ SESSION =================//
+input group "=== Session & News ==="
+input bool   InpUseSession=true;
+input int    InpStartHour=7;
+input int    InpEndHour=21;
+input bool   InpAvoidFriday=true;
+input bool   InpUseNews=true;
+input int    InpNewsBlock=30;
 
-//============================== TYPES ===============================
+//================ NOTIFY =================//
+input group "=== Notifications ==="
+input bool   InpPush=true;
+input bool   InpAlert=false;
+input bool   InpNotifyTrade=true;
+input bool   InpNotifyBlock=false;
 
-enum ENUM_SIGNAL { SIG_NONE = 0, SIG_BUY = 1, SIG_SELL = 2 };
+input group "=== System ==="
+input int    InpMagic=777777;
+input string InpComment="XAU Breakout";
 
-struct SRange
-{
-   bool     valid;
-   double   support;
-   double   resistance;
-   double   width;
-   int      supportTouches;
-   int      resistanceTouches;
-   double   atr;
-   double   adx;
-   string   reason;
-};
+//--- Constants
+#define MASTER_PASS "ANTU2024PRO"
+#define ADMIN_PASS  "ANTUADMIN99"
+#define LIC_SALT    "ANTU_GOLD_"
+#define CLR_GOLD    C'212,175,55'
+#define CLR_BG      C'18,18,22'
+#define CLR_LINE    C'35,35,42'
+#define CLR_MUTED   C'140,145,150'
+#define CLR_WHITE   C'250,250,255'
+#define CLR_GREEN   C'0,220,110'
+#define CLR_RED     C'255,70,70'
+#define CLR_WARN    C'255,180,50'
 
-//============================== GLOBALS =============================
+//--- Globals
+int atrHandle=INVALID_HANDLE;
+double dayBal=0;
+datetime lastBar=0;
+bool dailyHit=false,locked=false,licValid=false,adminMode=false;
+int consecLoss=0,dailyTrades=0;
+datetime trialStart=0;
 
-CTrade         g_trade;
-CPositionInfo  g_pos;
 
-int            g_atrHandle    = INVALID_HANDLE;
-int            g_adxHandle    = INVALID_HANDLE;
-int            g_rsiHandle    = INVALID_HANDLE;
 
-SRange         g_range;
-datetime       g_lastBarTime  = 0;
-int            g_breakoutCooldown = 0;
+//+------------------------------------------------------------------+
+//| LICENSE + NOTIFICATIONS                                          |
+//+------------------------------------------------------------------+
+void Notify(string m){if(InpPush)SendNotification(m);if(InpAlert)Alert(m);Print(m);}
+string GenKey(long a){string r=LIC_SALT+IntegerToString(a);int h=0;for(int i=0;i<StringLen(r);i++){h=h*31+StringGetCharacter(r,i);h=h%999999;}if(h<0)h=-h;return "ANTU-"+IntegerToString(h,6,'0');}
+bool CheckPass(){if(InpAdminPassword==ADMIN_PASS){adminMode=true;return true;}if(StringLen(InpPassword)==0||InpPassword!=MASTER_PASS)return false;return true;}
+bool CheckLic(){if(adminMode)return true;long a=AccountInfoInteger(ACCOUNT_LOGIN);if(StringLen(InpLicenseKey)>0&&InpLicenseKey==GenKey(a)){licValid=true;return true;}if(InpTrialDays>0){string gv="ANTU_BRK_"+IntegerToString(a);datetime f=(datetime)GlobalVariableGet(gv);if(f==0){f=TimeCurrent();GlobalVariableSet(gv,(double)f);trialStart=f;return true;}trialStart=f;if(InpTrialDays-(int)((TimeCurrent()-f)/86400)>0)return true;}return false;}
+int CountPos(){int c=0;for(int i=PositionsTotal()-1;i>=0;i--){ulong t=PositionGetTicket(i);if(t==0)continue;if(!PositionSelectByTicket(t))continue;if(PositionGetInteger(POSITION_MAGIC)==InpMagic&&PositionGetString(POSITION_SYMBOL)==_Symbol)c++;}return c;}
 
-double         g_dayStartEquity = 0;
-datetime       g_dayStartTime   = 0;
+//+------------------------------------------------------------------+
+//| DONCHIAN HELPERS (uses PERIOD_CURRENT = M15)                     |
+//+------------------------------------------------------------------+
+double DonchHigh(int per,int shift){double h=0;for(int i=shift;i<shift+per;i++){double v=iHigh(_Symbol,PERIOD_CURRENT,i);if(v>h)h=v;}return h;}
+double DonchLow(int per,int shift){double l=999999;for(int i=shift;i<shift+per;i++){double v=iLow(_Symbol,PERIOD_CURRENT,i);if(v<l)l=v;}return l;}
+double DonchMid(int per,int shift){return(DonchHigh(per,shift)+DonchLow(per,shift))/2.0;}
 
-int            g_totalTrades  = 0;
-int            g_wins         = 0;
-int            g_losses       = 0;
-ulong          g_lastDealId   = 0;
-
-int            g_logHandle = INVALID_HANDLE;
-string         g_lastReason = "";
-
-//============================== LOG =================================
-
-void WriteLog(const string msg)
-{
-   Print("[XAU RSP] ", msg);
-   if(g_logHandle == INVALID_HANDLE) return;
-   string line = StringFormat("%s | %s\n",
-                              TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
-                              msg);
-   FileWriteString(g_logHandle, line);
-   FileFlush(g_logHandle);
+//+------------------------------------------------------------------+
+//| LOT CALCULATOR                                                   |
+//+------------------------------------------------------------------+
+double CalcLot(double slPrice){
+   double eq=AccountInfoDouble(ACCOUNT_EQUITY);
+   double tv=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE);
+   double ts=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tv<=0||ts<=0)return InpFixedLot;
+   double risk=eq*InpRiskPercent/100.0;
+   double lpl=(slPrice/ts)*tv;
+   if(lpl<=0)return InpFixedLot;
+   double lot=risk/lpl;
+   if(InpMaxSLDollar>0)lot=MathMin(lot,InpMaxSLDollar/lpl);
+   double mn=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double mx=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+   double st=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(st<=0)st=0.01;
+   lot=MathFloor(lot/st)*st;
+   lot=MathMax(mn,MathMin(mx,MathMin(lot,InpMaxLotCap)));
+   return NormalizeDouble(lot,2);
 }
 
-//============================== RISK ================================
+//+------------------------------------------------------------------+
+//| SESSION / NEWS                                                   |
+//+------------------------------------------------------------------+
+bool IsTime(){if(!InpUseSession)return true;MqlDateTime d;TimeCurrent(d);if(d.hour<InpStartHour||d.hour>=InpEndHour)return false;if(InpAvoidFriday&&d.day_of_week==5&&d.hour>=19)return false;return true;}
+bool IsNews(){if(!InpUseNews||MQLInfoInteger(MQL_TESTER))return false;MqlCalendarValue v[];datetime t=TimeCurrent();if(CalendarValueHistory(v,t-InpNewsBlock*60,t+InpNewsBlock*60)){for(int i=0;i<ArraySize(v);i++){MqlCalendarEvent e;if(CalendarEventById(v[i].event_id,e)&&e.importance>=CALENDAR_IMPORTANCE_HIGH)return true;}}return false;}
 
-datetime StartOfDay(const datetime t)
-{
-   MqlDateTime dt;
-   TimeToStruct(t, dt);
-   dt.hour = 0; dt.min = 0; dt.sec = 0;
-   return StructToTime(dt);
+
+
+//+------------------------------------------------------------------+
+//| PROFESSIONAL DASHBOARD (Gold Style)                              |
+//+------------------------------------------------------------------+
+void DrawRect(string n,int x,int y,int w,int h,color bg){
+   if(ObjectFind(0,n)<0)ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,w);ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg);ObjectSetInteger(0,n,OBJPROP_COLOR,bg);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);ObjectSetInteger(0,n,OBJPROP_BACK,false);
+}
+void DrawTxt(string n,int x,int y,string t,int s,color c,string f="Segoe UI",bool b=false){
+   if(ObjectFind(0,n)<0)ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetString(0,n,OBJPROP_TEXT,t);ObjectSetInteger(0,n,OBJPROP_COLOR,c);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,s);ObjectSetString(0,n,OBJPROP_FONT,b?f+" Bold":f);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
 }
 
-void RiskOnTick()
-{
-   datetime today = StartOfDay(TimeCurrent());
-   if(today != g_dayStartTime)
-   {
-      g_dayStartTime   = today;
-      g_dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-   }
+void Dashboard(double pnl,string st,color sc,double chH,double chL){
+   DrawRect("D_Out",20,30,310,300,CLR_GOLD);
+   DrawRect("D_In",22,32,306,296,CLR_BG);
+   DrawRect("D_Hdr",22,32,306,40,CLR_GOLD);
+   DrawTxt("D_T",40,40,"XAU BREAKOUT PRO | M15",11,C'15,15,15',"Segoe UI Black",true);
+   DrawRect("D_L1",40,100,270,1,CLR_LINE);
+   DrawRect("D_L2",40,160,270,1,CLR_LINE);
+   DrawRect("D_L3",40,230,270,1,CLR_LINE);
+
+   DrawTxt("D_S0",40,80,"STATUS",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_S1",180,78,st,9,sc,"Segoe UI Black",true);
+
+   DrawTxt("D_P0",40,110,"TODAY P/L",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_P1",180,106,"$"+DoubleToString(pnl,2),14,pnl>=0?CLR_GREEN:CLR_RED,"Consolas",true);
+
+   DrawTxt("D_C0",40,135,"CHANNEL",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_C1",180,135,DoubleToString(chH,2)+" / "+DoubleToString(chL,2),8,CLR_WHITE,"Consolas",true);
+
+   DrawTxt("D_M0",40,170,"MAX SL",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_M1",180,170,"$"+DoubleToString(InpMaxSLDollar,2),8,CLR_WARN,"Consolas",true);
+
+   DrawTxt("D_T0",40,190,"TRADES TODAY",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_T1",180,190,IntegerToString(dailyTrades)+" / "+IntegerToString(InpMaxTrades),8,CLR_WHITE,"Consolas",true);
+
+   DrawTxt("D_L0",40,210,"CONSEC LOSS",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_L00",180,210,IntegerToString(consecLoss)+" / "+IntegerToString(InpMaxConsecLoss),8,locked?CLR_RED:CLR_WHITE,"Consolas",true);
+
+   DrawTxt("D_PO",40,240,"POSITIONS",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_PO1",180,240,IntegerToString(CountPos()),8,CLR_WHITE,"Consolas",true);
+
+   string li=licValid?"LICENSED":"TRIAL";
+   if(trialStart>0&&!licValid){int d=InpTrialDays-(int)((TimeCurrent()-trialStart)/86400);li="TRIAL: "+IntegerToString(d)+"d left";}
+   DrawTxt("D_LI",40,260,"LICENSE",8,CLR_MUTED,"Segoe UI",true);
+   DrawTxt("D_LI1",180,260,li,8,licValid?CLR_GREEN:CLR_WARN,"Consolas",true);
+
+   DrawTxt("D_FT",85,295,"POWERED BY ANTU TRADING",7,CLR_GOLD,"Segoe UI",true);
+   ChartRedraw();
 }
 
-double DayPnL()
-{
-   return AccountInfoDouble(ACCOUNT_EQUITY) - g_dayStartEquity;
-}
 
-double DayPnLPercent()
-{
-   if(g_dayStartEquity <= 0) return 0.0;
-   return (DayPnL() / g_dayStartEquity) * 100.0;
-}
 
-bool DailyLossHit()
-{
-   if(InpMaxDailyLossPercent <= 0) return false;
-   return DayPnLPercent() <= -InpMaxDailyLossPercent;
-}
-
-double NormalizeLot(double lots)
-{
-   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double stepLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   if(stepLot <= 0) stepLot = 0.01;
-   lots = MathMax(minLot, MathMin(maxLot, lots));
-   lots = MathFloor(lots / stepLot) * stepLot;
-   return NormalizeDouble(lots, 2);
-}
-
-double CalcLotByRisk(const double slDistancePrice)
-{
-   if(slDistancePrice <= 0) return 0.0;
-   double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskMoney = balance * (InpRiskPercent / 100.0);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   if(tickSize <= 0 || tickValue <= 0) return 0.0;
-   double lossPerLot = (slDistancePrice / tickSize) * tickValue;
-   if(lossPerLot <= 0) return 0.0;
-   return NormalizeLot(riskMoney / lossPerLot);
-}
-
-//============================== FILTERS =============================
-
-int CurrentSpreadPoints()
-{
-   return (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-}
-
-bool IsAroundHour(int curH, int curM, int targetH, int avoidM)
-{
-   int curMinutes    = curH * 60 + curM;
-   int targetMinutes = targetH * 60;
-   int diff          = MathAbs(curMinutes - targetMinutes);
-   diff = MathMin(diff, 24 * 60 - diff);
-   return diff <= avoidM;
-}
-
-bool FiltersOK(string &reason)
-{
-   int sp = CurrentSpreadPoints();
-   if(sp > InpSpreadLimitPoints)
-   {
-      reason = StringFormat("Spread %d > %d", sp, InpSpreadLimitPoints);
-      return false;
-   }
-
-   if(!InpUseSessionFilter) return true;
-
-   MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
-   int h = dt.hour, m = dt.min;
-
-   if(InpSessionStartHour <= InpSessionEndHour)
-   {
-      if(h < InpSessionStartHour || h >= InpSessionEndHour)
-      {
-         reason = StringFormat("Outside session %02d-%02d", InpSessionStartHour, InpSessionEndHour);
-         return false;
+//+------------------------------------------------------------------+
+//| TRADE MANAGEMENT                                                 |
+//+------------------------------------------------------------------+
+void ManageTrades(){
+   double atrA[];if(CopyBuffer(atrHandle,0,1,1,atrA)<=0)return;
+   double atr=atrA[0];
+   for(int i=PositionsTotal()-1;i>=0;i--){
+      ulong tk=PositionGetTicket(i);if(!PositionSelectByTicket(tk))continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol||PositionGetInteger(POSITION_MAGIC)!=InpMagic)continue;
+      double op=PositionGetDouble(POSITION_PRICE_OPEN),sl=PositionGetDouble(POSITION_SL),tp=PositionGetDouble(POSITION_TP);
+      double cp=PositionGetDouble(POSITION_PRICE_CURRENT),vol=PositionGetDouble(POSITION_VOLUME);
+      long pt=PositionGetInteger(POSITION_TYPE);string cm=PositionGetString(POSITION_COMMENT);
+      // PARTIAL
+      if(InpUsePartial&&StringFind(cm,"PC")<0){
+         double pd=atr*InpPartialMult;bool hit=false;
+         if(pt==POSITION_TYPE_BUY&&cp>=op+pd)hit=true;
+         if(pt==POSITION_TYPE_SELL&&cp<=op-pd)hit=true;
+         if(hit){double st2=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);double cl=MathFloor((vol*InpPartialPct/100.0)/st2)*st2;if(cl>=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)&&cl<vol){trade.PositionClosePartial(tk,cl);continue;}}
+      }
+      if(!PositionSelectByTicket(tk))continue;sl=PositionGetDouble(POSITION_SL);cp=PositionGetDouble(POSITION_PRICE_CURRENT);
+      // BE
+      if(InpUseBreakeven){
+         double bd=atr*InpBE_ATR_Mult,bl=InpBE_LockPips*_Point*10;
+         if(pt==POSITION_TYPE_BUY&&cp>op+bd){double ns=op+bl;if(sl<ns)trade.PositionModify(tk,ns,tp);}
+         if(pt==POSITION_TYPE_SELL&&cp<op-bd){double ns=op-bl;if(sl>ns||sl==0)trade.PositionModify(tk,ns,tp);}
+      }
+      // TRAIL
+      if(InpUseTrailing){
+         if(InpTrailByChannel){
+            double mid=DonchMid(InpChannelPeriod,1);
+            if(pt==POSITION_TYPE_BUY&&mid>sl&&mid>op)trade.PositionModify(tk,mid,tp);
+            if(pt==POSITION_TYPE_SELL&&(mid<sl||sl==0)&&mid<op)trade.PositionModify(tk,mid,tp);
+         }else{
+            double td=atr*InpTrail_ATR_Mult;
+            if(pt==POSITION_TYPE_BUY){double ns=cp-td;if(ns>sl&&ns>op)trade.PositionModify(tk,ns,tp);}
+            if(pt==POSITION_TYPE_SELL){double ns=cp+td;if((ns<sl||sl==0)&&ns<op)trade.PositionModify(tk,ns,tp);}
+         }
       }
    }
-   else
-   {
-      if(h < InpSessionStartHour && h >= InpSessionEndHour)
-      {
-         reason = StringFormat("Outside session %02d-%02d", InpSessionStartHour, InpSessionEndHour);
-         return false;
+}
+
+//+------------------------------------------------------------------+
+//| ON TRADE TRANSACTION                                             |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &tr,const MqlTradeRequest &rq,const MqlTradeResult &rs){
+   if(tr.type==TRADE_TRANSACTION_DEAL_ADD&&HistoryDealSelect(tr.deal)&&HistoryDealGetInteger(tr.deal,DEAL_MAGIC)==InpMagic){
+      ENUM_DEAL_ENTRY en=(ENUM_DEAL_ENTRY)HistoryDealGetInteger(tr.deal,DEAL_ENTRY);
+      if(en==DEAL_ENTRY_OUT||en==DEAL_ENTRY_INOUT){
+         double pr=HistoryDealGetDouble(tr.deal,DEAL_PROFIT);dailyTrades++;
+         if(pr>0){consecLoss=0;if(locked)locked=false;}
+         else if(pr<0){consecLoss++;if(InpMaxConsecLoss>0&&consecLoss>=InpMaxConsecLoss)locked=true;}
       }
    }
-
-   if(InpAvoidLondonOpen && IsAroundHour(h, m, InpLondonOpenHour, InpAvoidMinutesAround))
-   {
-      reason = "London open";
-      return false;
-   }
-   if(InpAvoidNYOpen && IsAroundHour(h, m, InpNyOpenHour, InpAvoidMinutesAround))
-   {
-      reason = "NY open";
-      return false;
-   }
-   return true;
 }
 
-//============================== RANGE DETECTION =====================
-
-bool RangeUpdate()
-{
-   ZeroMemory(g_range);
-   g_range.reason = "";
-
-   if(Bars(_Symbol, _Period) < InpRangeLookback + 5)
-   {
-      g_range.reason = "not enough bars";
-      return false;
-   }
-
-   double highs[], lows[], closes[];
-   ArraySetAsSeries(highs, true);
-   ArraySetAsSeries(lows, true);
-   ArraySetAsSeries(closes, true);
-   if(CopyHigh(_Symbol, _Period, 1, InpRangeLookback, highs) <= 0) return false;
-   if(CopyLow(_Symbol, _Period, 1, InpRangeLookback, lows)   <= 0) return false;
-   if(CopyClose(_Symbol, _Period, 1, InpRangeLookback, closes) <= 0) return false;
-
-   double resistance = highs[ArrayMaximum(highs, 0, InpRangeLookback)];
-   double support    = lows[ArrayMinimum(lows, 0, InpRangeLookback)];
-   double width      = resistance - support;
-   if(width <= 0) { g_range.reason = "no width"; return false; }
-
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double tol   = InpTouchTolerancePoints * point;
-
-   int sTouch = 0, rTouch = 0;
-   for(int i = 0; i < InpRangeLookback; i++)
-   {
-      if(highs[i] >= resistance - tol) rTouch++;
-      if(lows[i]  <= support + tol)    sTouch++;
-   }
-
-   double atrBuf[];
-   ArraySetAsSeries(atrBuf, true);
-   if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0) return false;
-   double atr = atrBuf[0];
-
-   double adxBuf[];
-   ArraySetAsSeries(adxBuf, true);
-   if(CopyBuffer(g_adxHandle, 0, 1, 1, adxBuf) <= 0) return false;
-   double adx = adxBuf[0];
-
-   g_range.support           = support;
-   g_range.resistance        = resistance;
-   g_range.width             = width;
-   g_range.supportTouches    = sTouch;
-   g_range.resistanceTouches = rTouch;
-   g_range.atr               = atr;
-   g_range.adx               = adx;
-
-   if(sTouch < InpMinTouchesPerSide || rTouch < InpMinTouchesPerSide)
-   {
-      g_range.valid = false;
-      g_range.reason = StringFormat("touches S=%d R=%d", sTouch, rTouch);
-      return true;
-   }
-
-   if(atr <= 0 || (atr / width) > InpAtrMaxRatio)
-   {
-      g_range.valid = false;
-      g_range.reason = StringFormat("ATR/W=%.2f", (width > 0 ? atr/width : 0));
-      return true;
-   }
-
-   if(adx > InpAdxMax)
-   {
-      g_range.valid = false;
-      g_range.reason = StringFormat("ADX=%.1f", adx);
-      return true;
-   }
-
-   g_range.valid = true;
-   g_range.reason = "OK";
-   return true;
-}
-
-bool IsStrongBreakout()
-{
-   if(g_range.width <= 0 || g_range.atr <= 0) return false;
-
-   double o[], c[];
-   ArraySetAsSeries(o, true);
-   ArraySetAsSeries(c, true);
-   if(CopyOpen(_Symbol, _Period, 1, 2, o) <= 0) return false;
-   if(CopyClose(_Symbol, _Period, 1, 2, c) <= 0) return false;
-
-   double body0 = MathAbs(c[0] - o[0]);
-   bool bigCandle = body0 > 1.2 * g_range.atr;
-
-   bool brokeUp   = (c[0] > g_range.resistance) && bigCandle;
-   bool brokeDown = (c[0] < g_range.support)    && bigCandle;
-   return brokeUp || brokeDown;
-}
-
-bool NearSupport(const double price)
-{
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double tol   = InpTouchTolerancePoints * point;
-   return (price <= g_range.support + tol);
-}
-
-bool NearResistance(const double price)
-{
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double tol   = InpTouchTolerancePoints * point;
-   return (price >= g_range.resistance - tol);
-}
-
-//============================== PATTERNS ============================
-
-bool IsBullishEngulfing(double o1, double c1, double o0, double c0)
-{
-   if(!(c1 < o1 && c0 > o0)) return false;
-   if(c0 < o1) return false;
-   if(o0 > c1) return false;
-   return true;
-}
-
-bool IsBearishEngulfing(double o1, double c1, double o0, double c0)
-{
-   if(!(c1 > o1 && c0 < o0)) return false;
-   if(c0 > o1) return false;
-   if(o0 < c1) return false;
-   return true;
-}
-
-bool IsBullishPin(double op, double hi, double lo, double cl)
-{
-   double rng = hi - lo;
-   if(rng <= 0) return false;
-   double body  = MathAbs(cl - op);
-   double lower = MathMin(op, cl) - lo;
-   double upper = hi - MathMax(op, cl);
-   if(lower < 1.5 * body) return false;
-   if(upper > 0.7 * body) return false;
-   return true;
-}
-
-bool IsShootingStar(double op, double hi, double lo, double cl)
-{
-   double rng = hi - lo;
-   if(rng <= 0) return false;
-   double body  = MathAbs(cl - op);
-   double upper = hi - MathMax(op, cl);
-   double lower = MathMin(op, cl) - lo;
-   if(upper < 1.5 * body) return false;
-   if(lower > 0.7 * body) return false;
-   return true;
-}
-
-//============================== SIGNAL ENGINE =======================
-
-ENUM_SIGNAL EvaluateSignal(double &outRsi, string &outReason)
-{
-   outRsi = 0.0;
-   outReason = "";
-
-   if(!g_range.valid)
-   {
-      outReason = "range " + g_range.reason;
-      return SIG_NONE;
-   }
-
-   double o[], h[], l[], c[];
-   ArraySetAsSeries(o, true);
-   ArraySetAsSeries(h, true);
-   ArraySetAsSeries(l, true);
-   ArraySetAsSeries(c, true);
-   if(CopyOpen(_Symbol, _Period, 1, 2, o)  <= 0) return SIG_NONE;
-   if(CopyHigh(_Symbol, _Period, 1, 2, h)  <= 0) return SIG_NONE;
-   if(CopyLow(_Symbol, _Period, 1, 2, l)   <= 0) return SIG_NONE;
-   if(CopyClose(_Symbol, _Period, 1, 2, c) <= 0) return SIG_NONE;
-
-   double rsiBuf[];
-   ArraySetAsSeries(rsiBuf, true);
-   if(CopyBuffer(g_rsiHandle, 0, 1, 1, rsiBuf) <= 0) return SIG_NONE;
-   double rsi = rsiBuf[0];
-   outRsi = rsi;
-
-   bool nearSup = NearSupport(l[0]);
-   bool nearRes = NearResistance(h[0]);
-
-   if(!nearSup && !nearRes)
-   {
-      outReason = "not at S/R";
-      return SIG_NONE;
-   }
-
-   if(nearSup)
-   {
-      bool engulf = IsBullishEngulfing(o[1], c[1], o[0], c[0]);
-      bool pin    = IsBullishPin(o[0], h[0], l[0], c[0]);
-      if(!engulf && !pin)
-      {
-         outReason = "no bull pattern";
-         return SIG_NONE;
-      }
-      if(rsi > InpRsiBuyMax)
-      {
-         outReason = StringFormat("rsi=%.0f > %.0f", rsi, InpRsiBuyMax);
-         return SIG_NONE;
-      }
-      return SIG_BUY;
-   }
-
-   if(nearRes)
-   {
-      bool engulf = IsBearishEngulfing(o[1], c[1], o[0], c[0]);
-      bool star   = IsShootingStar(o[0], h[0], l[0], c[0]);
-      if(!engulf && !star)
-      {
-         outReason = "no bear pattern";
-         return SIG_NONE;
-      }
-      if(rsi < InpRsiSellMin)
-      {
-         outReason = StringFormat("rsi=%.0f < %.0f", rsi, InpRsiSellMin);
-         return SIG_NONE;
-      }
-      return SIG_SELL;
-   }
-   return SIG_NONE;
-}
-
-//============================== TRADE MGMT ==========================
-
-int CountOpenPositions()
-{
-   int cnt = 0;
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-      cnt++;
-   }
-   return cnt;
-}
-
-void DrawEntryObjects(const ENUM_ORDER_TYPE type, const double price,
-                      const double sl, const double tp)
-{
-   if(!InpDrawObjects) return;
-   string ts = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
-   string tag = "XRSP_" + ts;
-   StringReplace(tag, ":", "");
-   StringReplace(tag, " ", "_");
-   StringReplace(tag, ".", "");
-
-   string arrowName = "ARR_" + tag;
-   if(ObjectCreate(0, arrowName, OBJ_ARROW, 0, TimeCurrent(), price))
-   {
-      ObjectSetInteger(0, arrowName, OBJPROP_ARROWCODE, (type == ORDER_TYPE_BUY) ? 233 : 234);
-      ObjectSetInteger(0, arrowName, OBJPROP_COLOR, (type == ORDER_TYPE_BUY) ? clrLime : clrRed);
-      ObjectSetInteger(0, arrowName, OBJPROP_WIDTH, 2);
-   }
-}
-
-bool OpenTrade(const ENUM_ORDER_TYPE type, const double lots,
-               const double sl, const double tp, const string comment)
-{
-   double price = (type == ORDER_TYPE_BUY)
-                  ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
-                  : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   bool ok = (type == ORDER_TYPE_BUY)
-             ? g_trade.Buy(lots, _Symbol, price, sl, tp, comment)
-             : g_trade.Sell(lots, _Symbol, price, sl, tp, comment);
-
-   if(ok)
-   {
-      WriteLog(StringFormat("OPEN %s lots=%.2f price=%.2f SL=%.2f TP=%.2f",
-                            (type == ORDER_TYPE_BUY ? "BUY":"SELL"),
-                            lots, price, sl, tp));
-      if(InpPushAlerts)
-         SendNotification(StringFormat("[XAU RSP] %s @ %.2f",
-                          (type == ORDER_TYPE_BUY ? "BUY":"SELL"), price));
-      DrawEntryObjects(type, price, sl, tp);
-   }
-   else
-   {
-      WriteLog(StringFormat("OPEN FAIL err=%d %s",
-                            g_trade.ResultRetcode(),
-                            g_trade.ResultRetcodeDescription()));
-   }
-   return ok;
-}
-
-void ManageOpenPositions()
-{
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   if(point <= 0) return;
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0) continue;
-      if(!g_pos.SelectByTicket(ticket)) continue;
-      if(g_pos.Symbol() != _Symbol) continue;
-      if((ulong)g_pos.Magic() != InpMagic) continue;
-
-      double openPrice = g_pos.PriceOpen();
-      double sl        = g_pos.StopLoss();
-      double tp        = g_pos.TakeProfit();
-      long   type      = g_pos.PositionType();
-
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double curPrice = (type == POSITION_TYPE_BUY) ? bid : ask;
-
-      double profitPts = (type == POSITION_TYPE_BUY)
-                         ? (curPrice - openPrice) / point
-                         : (openPrice - curPrice) / point;
-
-      double newSL = sl;
-
-      if(InpUseBreakEven && profitPts >= InpBreakEvenTriggerPts)
-      {
-         double beSL = (type == POSITION_TYPE_BUY)
-                       ? openPrice + InpBreakEvenLockPts * point
-                       : openPrice - InpBreakEvenLockPts * point;
-         if(type == POSITION_TYPE_BUY  && (sl < beSL || sl == 0)) newSL = beSL;
-         if(type == POSITION_TYPE_SELL && (sl > beSL || sl == 0)) newSL = beSL;
-      }
-
-      if(InpUseTrailing && profitPts >= InpTrailStartPoints)
-      {
-         double trailSL = (type == POSITION_TYPE_BUY)
-                          ? curPrice - InpTrailStepPoints * point
-                          : curPrice + InpTrailStepPoints * point;
-         if(type == POSITION_TYPE_BUY  && trailSL > newSL) newSL = trailSL;
-         if(type == POSITION_TYPE_SELL && (trailSL < newSL || newSL == 0)) newSL = trailSL;
-      }
-
-      if(MathAbs(newSL - sl) > point && newSL != 0)
-         g_trade.PositionModify(ticket, NormalizeDouble(newSL, _Digits), tp);
-   }
-}
-
-void CloseAllOurPositions(const string reason)
-{
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0) continue;
-      if(!g_pos.SelectByTicket(ticket)) continue;
-      if(g_pos.Symbol() != _Symbol) continue;
-      if((ulong)g_pos.Magic() != InpMagic) continue;
-      if(g_trade.PositionClose(ticket))
-         WriteLog(StringFormat("CLOSE ticket=%I64u (%s)", ticket, reason));
-   }
-}
-
-//============================== STATS ===============================
-
-void UpdateClosedTradeStats()
-{
-   datetime from = TimeCurrent() - 60 * 60 * 24 * 30;
-   if(!HistorySelect(from, TimeCurrent())) return;
-   int total = HistoryDealsTotal();
-   int trades = 0, wins = 0, losses = 0;
-   ulong newest = g_lastDealId;
-   for(int i = 0; i < total; i++)
-   {
-      ulong dealId = HistoryDealGetTicket(i);
-      if(dealId == 0) continue;
-      if((ulong)HistoryDealGetInteger(dealId, DEAL_MAGIC) != InpMagic) continue;
-      if(HistoryDealGetString(dealId, DEAL_SYMBOL) != _Symbol) continue;
-      if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealId, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
-      double profit = HistoryDealGetDouble(dealId, DEAL_PROFIT)
-                    + HistoryDealGetDouble(dealId, DEAL_SWAP)
-                    + HistoryDealGetDouble(dealId, DEAL_COMMISSION);
-      trades++;
-      if(profit >= 0) wins++; else losses++;
-      if(dealId > newest) newest = dealId;
-   }
-   g_totalTrades = trades;
-   g_wins = wins;
-   g_losses = losses;
-   g_lastDealId = newest;
-}
-
-//============================== DASHBOARD ===========================
-
-void DrawLabel(int line, const string title, const string value, color clr)
-{
-   string name = StringFormat("XRSP_DASH_L%02d", line);
-   string text = StringFormat("%-10s : %s", title, value);
-   if(ObjectFind(0, name) < 0)
-   {
-      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER,    CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, 20 + line * 16);
-      ObjectSetInteger(0, name, OBJPROP_FONTSIZE,  9);
-      ObjectSetString (0, name, OBJPROP_FONT,      "Consolas");
-   }
-   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetString (0, name, OBJPROP_TEXT,  text);
-}
-
-void UpdateDashboard()
-{
-   if(!InpShowDashboard) return;
-   int line = 0;
-   DrawLabel(line++, "XAU RSP", StringFormat("v2.0 %s", _Symbol), clrGold);
-   DrawLabel(line++, "Range",
-             g_range.valid
-                ? StringFormat("S=%.2f R=%.2f W=%.2f", g_range.support, g_range.resistance, g_range.width)
-                : StringFormat("INVALID (%s)", g_range.reason),
-             g_range.valid ? clrLime : clrOrangeRed);
-   DrawLabel(line++, "Touches",
-             StringFormat("S=%d R=%d ATR=%.2f ADX=%.1f",
-                          g_range.supportTouches, g_range.resistanceTouches,
-                          g_range.atr, g_range.adx),
-             clrWhite);
-   double wr = (g_totalTrades > 0) ? (100.0 * g_wins / g_totalTrades) : 0.0;
-   DrawLabel(line++, "Trades",
-             StringFormat("%d (W:%d L:%d) %.1f%%", g_totalTrades, g_wins, g_losses, wr),
-             clrWhite);
-   DrawLabel(line++, "Daily PnL",
-             StringFormat("%.2f (%.2f%%)", DayPnL(), DayPnLPercent()),
-             (DayPnL() >= 0) ? clrLime : clrRed);
-   DrawLabel(line++, "Spread", StringFormat("%d pts", CurrentSpreadPoints()), clrWhite);
-   DrawLabel(line++, "Status", g_lastReason == "" ? "scanning" : g_lastReason, clrOrange);
-}
-
-//============================== ONINIT / ONTICK =====================
-
-int OnInit()
-{
-   if(InpAllowOnlyXAU)
-   {
-      string sym = _Symbol;
-      StringToUpper(sym);
-      if(StringFind(sym, "XAU") < 0 && StringFind(sym, "GOLD") < 0)
-      {
-         Print("This EA is intended for XAUUSD/GOLD. Current: ", _Symbol);
-         return INIT_FAILED;
-      }
-   }
-
-   g_atrHandle = iATR(_Symbol, _Period, InpAtrPeriod);
-   g_adxHandle = iADX(_Symbol, _Period, InpAdxPeriod);
-   g_rsiHandle = iRSI(_Symbol, _Period, InpRsiPeriod, PRICE_CLOSE);
-   if(g_atrHandle == INVALID_HANDLE ||
-      g_adxHandle == INVALID_HANDLE ||
-      g_rsiHandle == INVALID_HANDLE)
-   {
-      Print("Indicator handle creation failed");
-      return INIT_FAILED;
-   }
-
-   g_trade.SetExpertMagicNumber(InpMagic);
-   g_trade.SetDeviationInPoints(InpSlippagePoints);
-   g_trade.SetTypeFillingBySymbol(_Symbol);
-
-   g_logHandle = FileOpen(InpLogFileName,
-                          FILE_WRITE|FILE_READ|FILE_TXT|FILE_COMMON|FILE_SHARE_READ);
-   if(g_logHandle != INVALID_HANDLE)
-   {
-      FileSeek(g_logHandle, 0, SEEK_END);
-      WriteLog("=== EA Started ===");
-   }
-
-   g_dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-   g_dayStartTime   = StartOfDay(TimeCurrent());
-
-   ZeroMemory(g_range);
-   g_lastBarTime = 0;
-   g_breakoutCooldown = 0;
-   g_totalTrades = g_wins = g_losses = 0;
-
-   Print("XAU RSP v2.0 Final initialised on ", _Symbol, " ", EnumToString(_Period));
+//+------------------------------------------------------------------+
+//| INIT / DEINIT                                                    |
+//+------------------------------------------------------------------+
+int OnInit(){
+   if(!CheckPass()){Alert("Invalid Password!");return INIT_FAILED;}
+   if(adminMode){long a=AccountInfoInteger(ACCOUNT_LOGIN);Alert("Account:"+IntegerToString(a)+"\nKey:"+GenKey(a));Comment("Key:"+GenKey(a));return INIT_SUCCEEDED;}
+   if(!CheckLic()){Alert("License expired!");return INIT_FAILED;}
+   trade.SetExpertMagicNumber(InpMagic);trade.SetDeviationInPoints(10);
+   dayBal=AccountInfoDouble(ACCOUNT_EQUITY);
+   atrHandle=iATR(_Symbol,PERIOD_CURRENT,InpATRPeriod);
+   if(atrHandle==INVALID_HANDLE){Print("ATR failed!");return INIT_FAILED;}
+   Notify("XAU Breakout Pro started! M15 | MaxSL:$"+DoubleToString(InpMaxSLDollar,2));
    return INIT_SUCCEEDED;
 }
+void OnDeinit(const int r){Comment("");ObjectsDeleteAll(0,"D_");IndicatorRelease(atrHandle);ChartRedraw();}
 
-void OnDeinit(const int reason)
-{
-   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
-   if(g_adxHandle != INVALID_HANDLE) IndicatorRelease(g_adxHandle);
-   if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
-   if(g_logHandle != INVALID_HANDLE)
-   {
-      WriteLog("=== EA Stopped ===");
-      FileClose(g_logHandle);
+
+
+//+------------------------------------------------------------------+
+//| ON TICK — MAIN LOGIC (Donchian Breakout M15)                     |
+//+------------------------------------------------------------------+
+void OnTick(){
+   if(adminMode)return;
+
+   // Daily reset
+   MqlDateTime dt;TimeCurrent(dt);static int pDay=-1;
+   if(dt.day!=pDay){pDay=dt.day;dailyHit=false;dailyTrades=0;consecLoss=0;locked=false;dayBal=AccountInfoDouble(ACCOUNT_EQUITY);}
+
+   double pnl=AccountInfoDouble(ACCOUNT_EQUITY)-dayBal;
+   if(InpUseDailyLimit&&(pnl>=InpDailyTarget||pnl<=-InpDailyMaxLoss))dailyHit=true;
+
+   ManageTrades();
+
+   // Channel for dashboard
+   double chH=DonchHigh(InpChannelPeriod,1),chL=DonchLow(InpChannelPeriod,1);
+
+   // Status
+   string st="HUNTING";color sc=CLR_GREEN;
+   if(dailyHit){st="TARGET HIT";sc=CLR_WARN;}
+   else if(locked){st="LOCKED";sc=CLR_RED;}
+   else if(!IsTime()){st="SLEEPING";sc=CLR_MUTED;}
+   else if(IsNews()){st="NEWS BLOCK";sc=CLR_WARN;}
+   else if(CountPos()>0){st="IN TRADE";sc=C'0,200,255';}
+
+   static datetime lastUI=0;
+   if(TimeCurrent()-lastUI>=1){Dashboard(pnl,st,sc,chH,chL);lastUI=TimeCurrent();}
+
+   // BLOCKS
+   if(dailyHit||locked||!IsTime()||IsNews())return;
+   if((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>350)return;
+   if(InpMaxTrades>0&&dailyTrades>=InpMaxTrades)return;
+
+   // NEW BAR (M15 = PERIOD_CURRENT)
+   datetime tArr[];
+   if(CopyTime(_Symbol,PERIOD_CURRENT,0,1,tArr)<=0||tArr[0]==lastBar)return;
+   lastBar=tArr[0];
+
+   if(CountPos()>0)return;
+
+   // ATR
+   double atrA[];if(CopyBuffer(atrHandle,0,1,1,atrA)<=0)return;
+   double atr=atrA[0];
+
+   // ATR MOMENTUM: must be above average
+   double atrAvg[];if(CopyBuffer(atrHandle,0,1,20,atrAvg)<=0)return;
+   double avg=0;for(int i=0;i<20;i++)avg+=atrAvg[i];avg/=20.0;
+   if(atr<avg*InpATRMinMult)return;
+
+   // DONCHIAN
+   double high=DonchHigh(InpChannelPeriod,2); // Channel of bars BEFORE last bar
+   double low=DonchLow(InpChannelPeriod,2);
+
+   // LAST COMPLETED BAR
+   double c1=iClose(_Symbol,PERIOD_CURRENT,1);
+   double c2=iClose(_Symbol,PERIOD_CURRENT,2);
+
+   // BREAKOUT SIGNALS
+   bool buy=(c1>high&&c2<=high);
+   bool sell=(c1<low&&c2>=low);
+
+   if(!buy&&!sell)return;
+
+   // SL/TP
+   double slD=atr*InpSL_ATR_Mult;
+   double tpD=atr*InpTP_ATR_Mult;
+   double lot=CalcLot(slD);
+   if(lot<=0)return;
+
+   if(buy){
+      double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
+      if(trade.Buy(lot,_Symbol,ask,NormalizeDouble(ask-slD,_Digits),NormalizeDouble(ask+tpD,_Digits),InpComment))
+         if(InpNotifyTrade)Notify("BUY Lot="+DoubleToString(lot,2)+" "+_Symbol);
    }
-   ObjectsDeleteAll(0, "XRSP_DASH_");
+   if(sell){
+      double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
+      if(trade.Sell(lot,_Symbol,bid,NormalizeDouble(bid+slD,_Digits),NormalizeDouble(bid-tpD,_Digits),InpComment))
+         if(InpNotifyTrade)Notify("SELL Lot="+DoubleToString(lot,2)+" "+_Symbol);
+   }
 }
-
-void OnTick()
-{
-   RiskOnTick();
-   ManageOpenPositions();
-
-   if(DailyLossHit())
-   {
-      static bool closedOnce = false;
-      if(!closedOnce)
-      {
-         CloseAllOurPositions("Daily loss limit");
-         closedOnce = true;
-      }
-      g_lastReason = "daily loss hit";
-      UpdateDashboard();
-      return;
-   }
-
-   datetime curBarTime = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
-   if(curBarTime == g_lastBarTime)
-   {
-      static datetime lastDashUpdate = 0;
-      if(TimeCurrent() - lastDashUpdate >= 2)
-      {
-         UpdateDashboard();
-         lastDashUpdate = TimeCurrent();
-      }
-      return;
-   }
-   g_lastBarTime = curBarTime;
-
-   RangeUpdate();
-
-   if(IsStrongBreakout())
-   {
-      g_breakoutCooldown = InpBreakoutCooldownBars;
-      WriteLog("Strong breakout -> cooldown");
-   }
-   if(g_breakoutCooldown > 0) g_breakoutCooldown--;
-
-   UpdateClosedTradeStats();
-
-   string filterReason = "";
-   bool filtersOk = FiltersOK(filterReason);
-
-   if(CountOpenPositions() >= InpMaxOpenTrades)
-   {
-      g_lastReason = "max trades open";
-      UpdateDashboard();
-      return;
-   }
-   if(g_breakoutCooldown > 0)
-   {
-      g_lastReason = StringFormat("breakout cooldown %d", g_breakoutCooldown);
-      UpdateDashboard();
-      return;
-   }
-   if(!filtersOk)
-   {
-      g_lastReason = filterReason;
-      UpdateDashboard();
-      return;
-   }
-
-   double rsi = 0.0;
-   string sigReason = "";
-   ENUM_SIGNAL sig = EvaluateSignal(rsi, sigReason);
-   if(sig == SIG_NONE)
-   {
-      g_lastReason = sigReason;
-      UpdateDashboard();
-      return;
-   }
-
-   double atr = (g_range.atr > 0) ? g_range.atr : 0.0;
-   if(atr <= 0)
-   {
-      g_lastReason = "atr=0";
-      UpdateDashboard();
-      return;
-   }
-
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double sl = 0, tp = 0, entry = 0;
-
-   if(sig == SIG_BUY)
-   {
-      entry = ask;
-      sl    = g_range.support - InpSlAtrMultiplier * atr;
-      double slDist = entry - sl;
-      tp    = entry + InpTpRRMultiplier * slDist;
-      if(InpTpAtRangeOpposite)
-         tp = MathMin(tp, g_range.resistance - 5 * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
-   }
-   else
-   {
-      entry = bid;
-      sl    = g_range.resistance + InpSlAtrMultiplier * atr;
-      double slDist = sl - entry;
-      tp    = entry - InpTpRRMultiplier * slDist;
-      if(InpTpAtRangeOpposite)
-         tp = MathMax(tp, g_range.support + 5 * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
-   }
-
-   double slDistPrice = MathAbs(entry - sl);
-   double tpDistPrice = MathAbs(tp - entry);
-   if(slDistPrice <= 0 || tpDistPrice < slDistPrice * 0.5)
-   {
-      g_lastReason = "RR too small";
-      UpdateDashboard();
-      return;
-   }
-
-   double lots = CalcLotByRisk(slDistPrice);
-   if(lots <= 0)
-   {
-      g_lastReason = "lots=0";
-      UpdateDashboard();
-      return;
-   }
-
-   sl = NormalizeDouble(sl, _Digits);
-   tp = NormalizeDouble(tp, _Digits);
-
-   string cmt = StringFormat("%s_%s", InpTradeComment, (sig == SIG_BUY ? "B":"S"));
-
-   ENUM_ORDER_TYPE otype = (sig == SIG_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   OpenTrade(otype, lots, sl, tp, cmt);
-
-   g_lastReason = (sig == SIG_BUY) ? "BUY signal" : "SELL signal";
-   UpdateDashboard();
-}
-
-void OnTrade() {}
 //+------------------------------------------------------------------+
