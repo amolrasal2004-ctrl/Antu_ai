@@ -45,11 +45,13 @@ InpMaxConsecutiveLoss=3
 InpMaxTradesPerDay=6
 
 ; === Quality Filters ===
-InpMinBandDistancePips=30.0
+InpMinBandDistancePips=5.0
 InpMaxSpread=5000
-InpMinATRPips=5.0
-InpMaxATRPips=5000.0
+InpMinATRPips=1.0
+InpMaxATRPips=50000.0
 InpUseATRMaxFilter=false
+InpRSIBuyLevel=45.0
+InpRSISellLevel=55.0
 
 ; === Time & News Guard ===
 InpUseSessionTime=false

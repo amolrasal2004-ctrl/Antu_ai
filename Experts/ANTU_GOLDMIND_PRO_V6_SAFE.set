@@ -50,6 +50,8 @@ InpMaxSpread=350
 InpMinATRPips=10.0
 InpMaxATRPips=400.0
 InpUseATRMaxFilter=true
+InpRSIBuyLevel=35.0
+InpRSISellLevel=65.0
 
 ; === Time & News Guard ===
 InpUseSessionTime=true

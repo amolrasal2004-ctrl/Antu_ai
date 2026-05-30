@@ -69,6 +69,8 @@ input int      InpMaxSpread          = 350;      // Max spread points
 input double   InpMinATRPips         = 10.0;     // Min ATR pips
 input double   InpMaxATRPips         = 400.0;    // Max ATR pips
 input bool     InpUseATRMaxFilter    = true;     // Enable HIGH VOL block
+input double   InpRSIBuyLevel        = 35.0;     // RSI Buy level (below = buy signal)
+input double   InpRSISellLevel       = 65.0;     // RSI Sell level (above = sell signal)
 
 //================ TIME / NEWS GUARD ===============//
 input group "=== Time & News Guard ==="
@@ -753,7 +755,7 @@ void OnTick(){
    if(lot<=0) return;
 
    //-------- BUY SIGNAL
-   if(last_close <= bb_lower[1] && rsi_buffer[0] < 35.0){
+   if(last_close <= bb_lower[1] && rsi_buffer[0] < InpRSIBuyLevel){
       double sl = ask - PipsToPrice(slPips);
       double tp = ask + PipsToPrice(tpPips);
       if(!trade.Buy(lot,_Symbol,ask,NormalizeDouble(sl,_Digits),NormalizeDouble(tp,_Digits),InpComment))
@@ -764,7 +766,7 @@ void OnTick(){
    }
 
    //-------- SELL SIGNAL
-   if(last_close >= bb_upper[1] && rsi_buffer[0] > 65.0){
+   if(last_close >= bb_upper[1] && rsi_buffer[0] > InpRSISellLevel){
       double sl = bid + PipsToPrice(slPips);
       double tp = bid - PipsToPrice(tpPips);
       if(!trade.Sell(lot,_Symbol,bid,NormalizeDouble(sl,_Digits),NormalizeDouble(tp,_Digits),InpComment))
