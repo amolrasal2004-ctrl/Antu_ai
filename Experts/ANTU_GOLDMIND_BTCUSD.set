@@ -19,16 +19,16 @@ InpMaxSLDollar=5.0
 InpUseATRStops=true
 InpATRMultSL=1.2
 InpATRMultTP=3.5
-InpFixedSLPips=50.0
-InpFixedTPPips=80.0
+InpFixedSLPips=10.0
+InpFixedTPPips=15.0
 
 ; === Trailing & Breakeven ===
 InpUseBreakeven=true
-InpBEActivatePips=20.0
-InpBEOffsetPips=5.0
+InpBEActivatePips=5.0
+InpBEOffsetPips=2.0
 InpUseTrailing=true
-InpTrailStartPips=30.0
-InpTrailStepPips=15.0
+InpTrailStartPips=8.0
+InpTrailStepPips=4.0
 
 ; === Partial Close (Profit Booster) ===
 InpUsePartialClose=true
@@ -45,20 +45,20 @@ InpMaxConsecutiveLoss=3
 InpMaxTradesPerDay=6
 
 ; === Quality Filters ===
-InpMinBandDistancePips=100.0
-InpMaxSpread=500
-InpMinATRPips=20.0
-InpMaxATRPips=800.0
-InpUseATRMaxFilter=true
+InpMinBandDistancePips=30.0
+InpMaxSpread=5000
+InpMinATRPips=5.0
+InpMaxATRPips=5000.0
+InpUseATRMaxFilter=false
 
 ; === Time & News Guard ===
-InpUseSessionTime=true
-InpStartHour=8
-InpEndHour=22
-InpAvoidFridayLate=true
-InpAvoidMondayOpen=true
-InpNewsTimes=13:30,15:00,18:00
-InpNewsBlockMinutes=15
+InpUseSessionTime=false
+InpStartHour=0
+InpEndHour=23
+InpAvoidFridayLate=false
+InpAvoidMondayOpen=false
+InpNewsTimes=
+InpNewsBlockMinutes=0
 
 ; === Mobile Notifications ===
 InpSendPushNotify=true
