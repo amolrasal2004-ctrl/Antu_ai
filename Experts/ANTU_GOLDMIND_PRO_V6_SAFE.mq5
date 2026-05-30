@@ -5,7 +5,7 @@
 //|        Philosophy: SMALL LOSS, STEADY GAIN, NEWS = NO TRADE      |
 //+------------------------------------------------------------------+
 #property copyright "ANTU Trading"
-#property version   "6.40"
+#property version   "6.50"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -44,6 +44,12 @@ input double   InpBEOffsetPips       = 2.0;      // Lock +X pips at BE
 input bool     InpUseTrailing        = true;     // Trail stop
 input double   InpTrailStartPips     = 10.0;     // Start trail after +X pips (earlier trail)
 input double   InpTrailStepPips      = 5.0;      // Trail distance pips (tight = lock more profit)
+
+//================ PARTIAL CLOSE ====================//
+input group "=== Partial Close (Profit Booster) ==="
+input bool     InpUsePartialClose    = true;     // Enable Partial Close
+input double   InpPartialPercent     = 50.0;     // % of position to close (50 = half)
+input double   InpPartialTPRatio     = 0.5;      // Close at X of full TP (0.5 = half TP)
 
 
 //================ DAILY GUARD =====================//
@@ -570,7 +576,7 @@ bool IsTradingTime(){
 
 
 //+------------------------------------------------------------------+
-//| Trailing / Breakeven                                             |
+//| Trailing / Breakeven / Partial Close                             |
 //+------------------------------------------------------------------+
 void ManageOpenPositions(){
    for(int i=PositionsTotal()-1;i>=0;i--){
@@ -584,16 +590,41 @@ void ManageOpenPositions(){
       double open = PositionGetDouble(POSITION_PRICE_OPEN);
       double sl   = PositionGetDouble(POSITION_SL);
       double tp   = PositionGetDouble(POSITION_TP);
+      double vol  = PositionGetDouble(POSITION_VOLUME);
       double bid  = SymbolInfoDouble(_Symbol,SYMBOL_BID);
       double ask  = SymbolInfoDouble(_Symbol,SYMBOL_ASK);
       double newSL = sl;
 
       if(type==POSITION_TYPE_BUY){
          double profitPips = PriceToPips(bid - open);
+         double tpPips = PriceToPips(tp - open);
+         
+         // PARTIAL CLOSE: Close half at 50% of TP
+         if(InpUsePartialClose && tpPips > 0){
+            double partialTarget = tpPips * InpPartialTPRatio;
+            if(profitPips >= partialTarget){
+               double closeLot = NormalizeDouble(vol * InpPartialPercent / 100.0, 2);
+               double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+               if(closeLot >= minLot && vol > minLot){
+                  // Check if already partially closed (volume reduced)
+                  string comment = PositionGetString(POSITION_COMMENT);
+                  if(StringFind(comment, "PC") < 0){
+                     trade.PositionClosePartial(ticket, closeLot);
+                     PrintFormat("PARTIAL CLOSE BUY: %.2f lot at +%.1f pips", closeLot, profitPips);
+                     if(InpNotifyOnTrade)
+                        SendNotify("ANTU EA: PARTIAL CLOSE BUY +"+DoubleToString(profitPips,1)+"pip");
+                     continue; // skip further modification this tick
+                  }
+               }
+            }
+         }
+         
+         // Breakeven
          if(InpUseBreakeven && profitPips >= InpBEActivatePips){
             double be = open + PipsToPrice(InpBEOffsetPips);
             if(sl < be) newSL = be;
          }
+         // Trailing
          if(InpUseTrailing && profitPips >= InpTrailStartPips){
             double trail = bid - PipsToPrice(InpTrailStepPips);
             if(trail > newSL) newSL = trail;
@@ -603,10 +634,33 @@ void ManageOpenPositions(){
       }
       else if(type==POSITION_TYPE_SELL){
          double profitPips = PriceToPips(open - ask);
+         double tpPips = PriceToPips(open - tp);
+         
+         // PARTIAL CLOSE: Close half at 50% of TP
+         if(InpUsePartialClose && tpPips > 0){
+            double partialTarget = tpPips * InpPartialTPRatio;
+            if(profitPips >= partialTarget){
+               double closeLot = NormalizeDouble(vol * InpPartialPercent / 100.0, 2);
+               double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+               if(closeLot >= minLot && vol > minLot){
+                  string comment = PositionGetString(POSITION_COMMENT);
+                  if(StringFind(comment, "PC") < 0){
+                     trade.PositionClosePartial(ticket, closeLot);
+                     PrintFormat("PARTIAL CLOSE SELL: %.2f lot at +%.1f pips", closeLot, profitPips);
+                     if(InpNotifyOnTrade)
+                        SendNotify("ANTU EA: PARTIAL CLOSE SELL +"+DoubleToString(profitPips,1)+"pip");
+                     continue;
+                  }
+               }
+            }
+         }
+         
+         // Breakeven
          if(InpUseBreakeven && profitPips >= InpBEActivatePips){
             double be = open - PipsToPrice(InpBEOffsetPips);
             if(sl==0 || sl > be) newSL = be;
          }
+         // Trailing
          if(InpUseTrailing && profitPips >= InpTrailStartPips){
             double trail = ask + PipsToPrice(InpTrailStepPips);
             if(newSL==0 || trail < newSL) newSL = trail;

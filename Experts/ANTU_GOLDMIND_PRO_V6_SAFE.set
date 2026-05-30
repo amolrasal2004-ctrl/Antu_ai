@@ -1,5 +1,5 @@
-; ANTU GOLDMIND PRO V6 SAFE - Optimized Settings V6.40
-; Target: XAUUSD M5 | Avg Profit > Avg Loss | DD under $10
+; ANTU GOLDMIND PRO V6 SAFE - Optimized Settings V6.50
+; Target: XAUUSD M5 | Partial Close + Trail = Max Profit Capture
 ; POWERED BY ANTU TRADING
 
 ; === License & Security ===
@@ -29,6 +29,11 @@ InpBEOffsetPips=2.0
 InpUseTrailing=true
 InpTrailStartPips=10.0
 InpTrailStepPips=5.0
+
+; === Partial Close (Profit Booster) ===
+InpUsePartialClose=true
+InpPartialPercent=50.0
+InpPartialTPRatio=0.5
 
 ; === Daily Guard ===
 InpUsePercentGuard=true
