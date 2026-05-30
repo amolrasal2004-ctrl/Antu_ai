@@ -1,0 +1,71 @@
+; ANTU GOLDMIND PRO V6 SAFE - USDJPY Optimized Settings
+; Target: USDJPY M5 | Bollinger Band + RSI Scalping
+; POWERED BY ANTU TRADING
+
+; === License & Security ===
+InpPassword=ANTU2024PRO
+InpLicenseKey=
+InpTrialDays=7
+InpAdminPassword=
+
+; === Money Management ===
+InpUseRiskPercent=true
+InpRiskPercent=0.8
+InpFixedLotSize=0.01
+InpMaxLotCap=0.50
+InpMaxSLDollar=3.0
+
+; === Stop Loss / Take Profit ===
+InpUseATRStops=true
+InpATRMultSL=1.2
+InpATRMultTP=3.5
+InpFixedSLPips=15.0
+InpFixedTPPips=20.0
+
+; === Trailing & Breakeven ===
+InpUseBreakeven=true
+InpBEActivatePips=5.0
+InpBEOffsetPips=1.5
+InpUseTrailing=true
+InpTrailStartPips=7.0
+InpTrailStepPips=3.0
+
+; === Partial Close (Profit Booster) ===
+InpUsePartialClose=true
+InpPartialPercent=50.0
+InpPartialTPRatio=0.5
+
+; === Daily Guard ===
+InpUsePercentGuard=true
+InpDailyTargetPct=3.0
+InpDailyMaxLossPct=3.0
+InpDailyTargetUSD=20.0
+InpDailyMaxLossUSD=10.0
+InpMaxConsecutiveLoss=3
+InpMaxTradesPerDay=10
+
+; === Quality Filters ===
+InpMinBandDistancePips=20.0
+InpMaxSpread=15
+InpMinATRPips=3.0
+InpMaxATRPips=35.0
+InpUseATRMaxFilter=true
+
+; === Time & News Guard ===
+InpUseSessionTime=true
+InpStartHour=3
+InpEndHour=20
+InpAvoidFridayLate=true
+InpAvoidMondayOpen=true
+InpNewsTimes=13:30,15:00,18:00
+InpNewsBlockMinutes=15
+
+; === Mobile Notifications ===
+InpSendPushNotify=true
+InpSendAlert=false
+InpNotifyOnTrade=true
+InpNotifyOnBlock=false
+
+; === System ===
+InpMagicNumber=654325
+InpComment=Goldmind USDJPY

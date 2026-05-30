@@ -1,0 +1,71 @@
+; ANTU GOLDMIND PRO V6 SAFE - XAGUSD (Silver) Optimized Settings
+; Target: XAGUSD M5 | Bollinger Band + RSI Scalping
+; POWERED BY ANTU TRADING
+
+; === License & Security ===
+InpPassword=ANTU2024PRO
+InpLicenseKey=
+InpTrialDays=7
+InpAdminPassword=
+
+; === Money Management ===
+InpUseRiskPercent=true
+InpRiskPercent=0.8
+InpFixedLotSize=0.01
+InpMaxLotCap=0.50
+InpMaxSLDollar=3.0
+
+; === Stop Loss / Take Profit ===
+InpUseATRStops=true
+InpATRMultSL=1.2
+InpATRMultTP=3.5
+InpFixedSLPips=20.0
+InpFixedTPPips=25.0
+
+; === Trailing & Breakeven ===
+InpUseBreakeven=true
+InpBEActivatePips=6.0
+InpBEOffsetPips=2.0
+InpUseTrailing=true
+InpTrailStartPips=8.0
+InpTrailStepPips=4.0
+
+; === Partial Close (Profit Booster) ===
+InpUsePartialClose=true
+InpPartialPercent=50.0
+InpPartialTPRatio=0.5
+
+; === Daily Guard ===
+InpUsePercentGuard=true
+InpDailyTargetPct=5.0
+InpDailyMaxLossPct=5.0
+InpDailyTargetUSD=30.0
+InpDailyMaxLossUSD=15.0
+InpMaxConsecutiveLoss=3
+InpMaxTradesPerDay=8
+
+; === Quality Filters ===
+InpMinBandDistancePips=30.0
+InpMaxSpread=50
+InpMinATRPips=5.0
+InpMaxATRPips=100.0
+InpUseATRMaxFilter=true
+
+; === Time & News Guard ===
+InpUseSessionTime=true
+InpStartHour=8
+InpEndHour=21
+InpAvoidFridayLate=true
+InpAvoidMondayOpen=true
+InpNewsTimes=13:30,15:00,18:00
+InpNewsBlockMinutes=15
+
+; === Mobile Notifications ===
+InpSendPushNotify=true
+InpSendAlert=false
+InpNotifyOnTrade=true
+InpNotifyOnBlock=false
+
+; === System ===
+InpMagicNumber=654323
+InpComment=Goldmind XAGUSD
