@@ -1,0 +1,66 @@
+; ANTU GOLDMIND PRO V6 SAFE - Optimized Settings V6.40
+; Target: XAUUSD M5 | Avg Profit > Avg Loss | DD under $10
+; POWERED BY ANTU TRADING
+
+; === License & Security ===
+InpPassword=ANTU2024PRO
+InpLicenseKey=
+InpTrialDays=7
+InpAdminPassword=
+
+; === Money Management ===
+InpUseRiskPercent=true
+InpRiskPercent=0.5
+InpFixedLotSize=0.01
+InpMaxLotCap=0.50
+InpMaxSLDollar=3.0
+
+; === Stop Loss / Take Profit ===
+InpUseATRStops=true
+InpATRMultSL=1.2
+InpATRMultTP=3.5
+InpFixedSLPips=25.0
+InpFixedTPPips=30.0
+
+; === Trailing & Breakeven ===
+InpUseBreakeven=true
+InpBEActivatePips=7.0
+InpBEOffsetPips=2.0
+InpUseTrailing=true
+InpTrailStartPips=10.0
+InpTrailStepPips=5.0
+
+; === Daily Guard ===
+InpUsePercentGuard=true
+InpDailyTargetPct=5.0
+InpDailyMaxLossPct=5.0
+InpDailyTargetUSD=30.0
+InpDailyMaxLossUSD=15.0
+InpMaxConsecutiveLoss=3
+InpMaxTradesPerDay=8
+
+; === Quality Filters ===
+InpMinBandDistancePips=50.0
+InpMaxSpread=350
+InpMinATRPips=10.0
+InpMaxATRPips=400.0
+InpUseATRMaxFilter=true
+
+; === Time & News Guard ===
+InpUseSessionTime=true
+InpStartHour=8
+InpEndHour=21
+InpAvoidFridayLate=true
+InpAvoidMondayOpen=true
+InpNewsTimes=13:30,15:00,18:00
+InpNewsBlockMinutes=15
+
+; === Mobile Notifications ===
+InpSendPushNotify=true
+InpSendAlert=false
+InpNotifyOnTrade=true
+InpNotifyOnBlock=false
+
+; === System ===
+InpMagicNumber=654321
+InpComment=Goldmind V6 Safe
