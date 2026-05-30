@@ -5,7 +5,7 @@
 //|        Philosophy: SMALL LOSS, STEADY GAIN, NEWS = NO TRADE      |
 //+------------------------------------------------------------------+
 #property copyright "ANTU Trading"
-#property version   "6.30"
+#property version   "6.40"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -26,24 +26,24 @@ input bool     InpUseRiskPercent     = true;     // Use % Risk
 input double   InpRiskPercent        = 0.5;      // Risk % per trade
 input double   InpFixedLotSize       = 0.01;     // Fixed Lot (if % off)
 input double   InpMaxLotCap          = 0.50;     // Max Lot Cap
-input double   InpMaxSLDollar        = 5.0;      // MAX SL $ per trade (hard cap)
+input double   InpMaxSLDollar        = 3.0;      // MAX SL $ per trade (hard cap - DD control)
 
 //================ SL / TP =========================//
 input group "=== Stop Loss / Take Profit ==="
 input bool     InpUseATRStops        = true;     // Use ATR-based SL/TP
-input double   InpATRMultSL          = 1.8;      // ATR x for SL
-input double   InpATRMultTP          = 2.2;      // ATR x for TP
+input double   InpATRMultSL          = 1.2;      // ATR x for SL (tight SL = small loss)
+input double   InpATRMultTP          = 3.5;      // ATR x for TP (wide TP = big profit)
 input double   InpFixedSLPips        = 25.0;     // Fixed SL pips (if ATR off)
 input double   InpFixedTPPips        = 30.0;     // Fixed TP pips (if ATR off)
 
 //================ TRAILING / BREAKEVEN ============//
 input group "=== Trailing & Breakeven ==="
 input bool     InpUseBreakeven       = true;     // Move SL to BE
-input double   InpBEActivatePips     = 10.0;     // Activate BE after +X pips
+input double   InpBEActivatePips     = 7.0;      // Activate BE after +X pips (quick BE)
 input double   InpBEOffsetPips       = 2.0;      // Lock +X pips at BE
 input bool     InpUseTrailing        = true;     // Trail stop
-input double   InpTrailStartPips     = 15.0;     // Start trail after +X pips
-input double   InpTrailStepPips      = 8.0;      // Trail distance pips
+input double   InpTrailStartPips     = 10.0;     // Start trail after +X pips (earlier trail)
+input double   InpTrailStepPips      = 5.0;      // Trail distance pips (tight = lock more profit)
 
 
 //================ DAILY GUARD =====================//
